@@ -46,7 +46,7 @@
   #btnRow{display:grid;grid-template-columns:1fr 1fr;gap:6px}
   #endTurn{grid-column:1/3;font-size:16px}
   /* ---- toasts ---- */
-  #toasts{position:absolute;left:8px;bottom:8px;display:flex;flex-direction:column;gap:5px;z-index:8;pointer-events:none;max-width:75%}
+  #toasts{position:absolute;left:8px;bottom:8px;display:flex;flex-direction:column;gap:5px;z-index:30;pointer-events:none;max-width:75%}
   .toast{background:#1c1611ee;border:1px solid var(--edge2);border-left:3px solid var(--gold);padding:6px 9px;
     font-size:13px;animation:tin .18s ease-out;border-radius:2px}
   .toast.bad{border-left-color:var(--red)}
@@ -1269,6 +1269,8 @@ function addStack(slots,cid,n){
   return false;
 }
 function recruitInto(t,tier,count){
+  count=Math.floor(count);
+  if(!Number.isFinite(count)||count<=0) return {ok:false,why:"Invalid count."};
   count=Math.min(count,t.pool[tier-1]);
   if(count<=0) return {ok:false,why:"None available until next week."};
   const cid=townCreature(t,tier), cre=CREATURES[cid];
@@ -1292,6 +1294,10 @@ function refreshTavern(t){
 function hireHero(t){
   if(!t.bld.tavern) return {ok:false,why:"No tavern."};
   if(!t.tav) return {ok:false,why:"No hero is seeking work this week."};
+  if(G.heroes.some(h=>h.name===t.tav)){    // candidate already hired at another town
+    t.tav=null; refreshTavern(t); refreshUI();
+    return {ok:false,why:"That hero has already been hired elsewhere."};
+  }
   if(G.heroes.filter(h=>h.owner===t.owner).length>=MAX_HEROES) return {ok:false,why:"Your banner already leads "+MAX_HEROES+" heroes."};
   if(G.players[t.owner].gold<2500) return {ok:false,why:"Hiring costs 2500 gold."};
   let spot=null;
@@ -1306,6 +1312,8 @@ function hireHero(t){
   G.heroes.push(h);
   occHero[idx(h.x,h.y)]=h.id;
   t.tav=null;
+  for(const o of G.objects)               // withdraw the same candidate everywhere
+    if(o.t==="town"&&!o.dead&&o!==t&&o.tav===h.name) o.tav=null;
   revealCircle(t.owner,h.x,h.y,SIGHT_HERO);
   recomputeVisible();
   if(t.owner===0) toast(`${h.name} answers the call at ${t.name}.`,"good");
@@ -1313,7 +1321,8 @@ function hireHero(t){
   return {ok:true,hero:h};
 }
 function tradeRes(p,kind,dir,qty){
-  qty=qty||1;
+  qty=Math.floor(qty===undefined?1:qty);
+  if(!Number.isFinite(qty)||qty<=0) return {ok:false,why:"Invalid amount."};
   const r=tradeRates(p);
   if(!r.buy) return {ok:false,why:"You need a Marketplace."};
   const price=BASE_PRICE[kind]; if(!price) return {ok:false,why:"Cannot trade that."};
@@ -1341,6 +1350,7 @@ function dateParts(){
 }
 function endTurn(){
   if(!G||G.cur!==0||anim) return;
+  if(modalBack.classList.contains("show")) return;   // never end the turn under a dialog
   UI.preview=null; UI.pending=null;
   G.cur=1; refreshUI();
   /* Phase 1 AI: the Covenant holds its ground and banks its income.
@@ -1360,7 +1370,7 @@ function newDay(){
       for(let tier=1;tier<=7;tier++)
         if(t.bld["d"+tier])
           t.pool[tier-1]+=Math.floor(CREATURES[ROSTER[t.fac][tier-1][0]].grow*growthMult(t));
-      if(t.bld.tavern&&!t.tav) refreshTavern(t);
+      if(t.bld.tavern&&(!t.tav||G.heroes.some(h=>h.name===t.tav))) refreshTavern(t);
     }
   }
   for(const h of G.heroes){
@@ -1391,8 +1401,13 @@ function showModal(html,locked,cls){
   modalEl.innerHTML=html; modalLocked=!!locked;
   modalEl.classList.toggle("wide",cls==="wide");
   modalBack.classList.add("show");
+  document.getElementById("app").inert=true;      // keep Tab focus inside the modal
 }
-function closeModal(){ modalBack.classList.remove("show"); modalLocked=false; townSel=null; }
+function closeModal(){
+  modalEl.scrollTop=0;                            // next open starts at the top
+  modalBack.classList.remove("show"); modalLocked=false; townSel=null;
+  document.getElementById("app").inert=false;
+}
 modalBack.addEventListener("pointerdown",e=>{ if(e.target===modalBack&&!modalLocked) closeModal(); });
 
 /* =============================================================================
@@ -1488,6 +1503,11 @@ function slotHtml(arr,i,stack){
 }
 function maxRecruit(t,tier){
   const cid=townCreature(t,tier), cre=CREATURES[cid], pl=G.players[t.owner];
+  /* no room anywhere -> the recruit buttons must disable */
+  const vh=visitingHero(t);
+  const room = t.garr.some(s=>s&&s.c===cid)||t.garr.some(s=>!s)||
+    (vh&&(vh.army.some(s=>s&&s.c===cid)||vh.army.some(s=>!s)));
+  if(!room) return 0;
   let m=t.pool[tier-1];
   for(const[k,v]of Object.entries(cre.cost)){
     const key=k==="rare"? factionRare(t.fac):k;
@@ -1641,7 +1661,7 @@ function serialize(){
 }
 function validStack(s){
   return s===null || (s&&Number.isInteger(s.c)&&s.c>=0&&s.c<CREATURES.length&&
-    typeof s.n==="number"&&isFinite(s.n)&&s.n>0);
+    Number.isInteger(s.n)&&s.n>0);
 }
 function normArmy(a){
   const out=Array.isArray(a)? a.slice(0,7):[];
@@ -1663,6 +1683,7 @@ function loadFrom(json){
     if(typeof h.mp!=="number"||!isFinite(h.mp)||typeof h.maxMp!=="number") bad("Corrupt hero data.");
     h.fac=h.fac===1?1:0;
     h.artifacts=Array.isArray(h.artifacts)? h.artifacts.filter(i=>Number.isInteger(i)&&i>=0&&i<ARTIFACTS.length):[];
+    if(d.v===2&&!Array.isArray(h.army)) bad("Corrupt army data.");
     h.army=normArmy(h.army);
     if(!h.army.every(validStack)) bad("Corrupt army data.");
     if(d.v===1&&!h.army.some(Boolean))          // Phase 1 heroes marched alone
@@ -1676,10 +1697,11 @@ function loadFrom(json){
     if(o.t==="art"&&!(Number.isInteger(o.art)&&o.art>=0&&o.art<ARTIFACTS.length)) bad("Corrupt artifact data.");
     if(o.t==="town"){
       o.fac=o.fac===1?1:0;
-      if(d.v===1||!o.bld) initTownState(o,o.slot===0);       // migrate Phase 1 towns
+      if(d.v===1) initTownState(o,o.slot===0);               // migrate Phase 1 towns
       if(typeof o.bld!=="object"||o.bld===null) bad("Corrupt town data.");
       for(const k of Object.keys(o.bld)){ if(!BLD_BY_ID[k]) bad("Corrupt town data."); o.bld[k]=true; }
-      if(!Array.isArray(o.pool)||o.pool.length!==7||o.pool.some(n=>!(typeof n==="number"&&isFinite(n)&&n>=0))) bad("Corrupt town data.");
+      if(!Array.isArray(o.pool)||o.pool.length!==7||o.pool.some(n=>!(Number.isInteger(n)&&n>=0))) bad("Corrupt town data.");
+      if(d.v===2&&!Array.isArray(o.garr)) bad("Corrupt garrison data.");
       o.garr=normArmy(o.garr);
       if(!o.garr.every(validStack)) bad("Corrupt garrison data.");
       o.builtToday=!!o.builtToday;
