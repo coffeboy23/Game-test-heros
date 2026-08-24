@@ -83,11 +83,13 @@
   @media (max-width:760px){
     #main{grid-template-columns:1fr;grid-template-rows:1fr auto}
     #side{border-left:none;border-top:2px solid var(--edge2);flex-direction:row;flex-wrap:nowrap;overflow-x:auto;
-      overflow-y:hidden;align-items:stretch;max-height:172px;padding:6px;gap:6px}
+      overflow-y:hidden;align-items:stretch;max-height:180px;padding:6px;gap:6px}
     #side>*{flex:0 0 auto}
-    #minimap{width:150px;height:150px}
-    .pcol{display:flex;flex-direction:column;gap:5px;width:160px}
-    #btnRow{grid-template-columns:1fr 1fr;width:170px}
+    #minimap{width:156px;height:156px}
+    .pcol{display:flex;flex-direction:column;gap:5px;width:160px;overflow-y:auto}
+    #btnRow{grid-template-columns:1fr 1fr 1fr;width:280px;align-content:start}
+    #side button{min-height:34px;padding:5px 4px;font-size:12px}
+    #endTurn{grid-column:1/4;font-size:14px;min-height:40px}
     #topbar{font-size:12px;gap:7px}
   }
   .pcol{display:flex;flex-direction:column;gap:5px}
@@ -301,10 +303,18 @@ function generateWorld(seed){
   }
   carveRoad(6,7,14,11); carveRoad(7,7,15,15); setT(15,15,TER.ROAD);
 
+  /* retry with fresh random anchors until a spot is found (or give up loudly late) */
+  function findSpotRetry(ax,ay,r){
+    let s=findSpot(ax,ay,r);
+    for(let k=0;k<30&&!s;k++)
+      s=findSpot(3+Math.floor(rnd()*24),3+Math.floor(rnd()*24),6);
+    return s;
+  }
+
   /* --- mines: 1 gold, 2 wood, 2 ore, 1 moonshard, 1 emberglass per side --- */
   const mineAnchors = [ ["gold",10,4],["wood",4,11],["wood",13,7],["ore",9,13],["ore",4,4],["moon",18,4],["ember",5,18] ];
   for(const [sub,ax,ay] of mineAnchors){
-    const s=findSpot(ax,ay,4); if(!s) continue;
+    const s=findSpotRetry(ax,ay,4); if(!s) continue;
     clearArea(s.x,s.y,1,terr[idx(s.x,s.y)]===TER.ROAD?TER.ROAD:TER.GRASS);
     addPair({t:"mine", sub, x:s.x, y:s.y, owner:-1});
   }
@@ -312,21 +322,21 @@ function generateWorld(seed){
   /* --- resource piles, chests, artifacts, guards --- */
   const pileKinds=["gold","gold","wood","wood","wood","ore","ore","ore","moon","ember"];
   for(let i=0;i<10;i++){
-    const s=findSpot(3+Math.floor(rnd()*22),3+Math.floor(rnd()*22),5); if(!s) continue;
+    const s=findSpotRetry(3+Math.floor(rnd()*22),3+Math.floor(rnd()*22),5); if(!s) continue;
     const sub=pileKinds[i%pileKinds.length];
     const amt= sub==="gold" ? 500+100*Math.floor(rnd()*11) : (sub==="moon"||sub==="ember") ? 2+Math.floor(rnd()*3) : 4+Math.floor(rnd()*6);
     addPair({t:"pile", sub, amt, x:s.x, y:s.y});
   }
   for(let i=0;i<6;i++){
-    const s=findSpot(3+Math.floor(rnd()*23),3+Math.floor(rnd()*23),5); if(!s) continue;
+    const s=findSpotRetry(3+Math.floor(rnd()*23),3+Math.floor(rnd()*23),5); if(!s) continue;
     addPair({t:"chest", x:s.x, y:s.y});
   }
   for(let i=0;i<3;i++){
-    const s=findSpot(6+Math.floor(rnd()*18),6+Math.floor(rnd()*18),6); if(!s) continue;
+    const s=findSpotRetry(6+Math.floor(rnd()*18),6+Math.floor(rnd()*18),6); if(!s) continue;
     addPair({t:"art", art:Math.floor(rnd()*ARTIFACTS.length), x:s.x, y:s.y});
   }
   for(let i=0;i<5;i++){
-    const s=findSpot(8+Math.floor(rnd()*16),8+Math.floor(rnd()*16),7); if(!s) continue;
+    const s=findSpotRetry(8+Math.floor(rnd()*16),8+Math.floor(rnd()*16),7); if(!s) continue;
     addPair({t:"guard", cre:pick(rnd,GUARD_KINDS), n:8+Math.floor(rnd()*20), x:s.x, y:s.y});
   }
 
@@ -805,10 +815,11 @@ function drawMinimap(){
     }
   }
   mctx.drawImage(miniBuf,0,0);
-  /* viewport rectangle */
+  /* viewport rectangle, clamped to the minimap */
   mctx.strokeStyle="#ffd95e"; mctx.lineWidth=1;
-  const vw=viewW/cam.z/TILE*MSC, vh=viewH/cam.z/TILE*MSC;
-  mctx.strokeRect(cam.x/TILE*MSC, cam.y/TILE*MSC, Math.min(vw,128), Math.min(vh,128));
+  const bx=clamp(cam.x/TILE*MSC,0,127), by=clamp(cam.y/TILE*MSC,0,127);
+  const vw=Math.min(viewW/cam.z/TILE*MSC,128-bx), vh=Math.min(viewH/cam.z/TILE*MSC,128-by);
+  mctx.strokeRect(bx+0.5, by+0.5, vw-1, vh-1);
 }
 
 /* =============================================================================
@@ -816,6 +827,7 @@ function drawMinimap(){
    ========================================================================== */
 let G=null;                 // serializable game state
 let anim=null;              // movement animation {hero,steps,i,px,py,t0,done}
+let aiTimer=null;           // pending AI-turn -> newDay timer
 const UI={ selected:null, preview:null, pending:null };
 
 const occObj=new Int32Array(MAPW*MAPH);   // object array index or -1
@@ -1048,9 +1060,11 @@ function endTurn(){
   G.cur=1; refreshUI();
   /* Phase 1 AI: the Covenant holds its ground and banks its income.
      Exploration, recruiting and raids arrive in Phase 5. */
-  setTimeout(newDay, 300);
+  aiTimer=setTimeout(newDay, 300);
 }
 function newDay(){
+  aiTimer=null;
+  if(!G||G.cur!==1) return;   // stale timer after a new game / load
   G.day++; G.cur=0;
   applyIncome();
   for(const h of G.heroes){ h.mp=h.maxMp; h.mana=Math.min(h.maxMana,h.mana+ (h.know*1)); }
@@ -1097,6 +1111,7 @@ function initTopbar(){
 }
 function refreshUI(){
   if(!G) return;
+  lastHover=-1;               // invalidate hover-preview cache after any state change
   const inc=incomeOf(0);
   for(const k of RES_KEYS){
     resEls[k].v.textContent=fmt(G.players[0][k]);
@@ -1182,18 +1197,51 @@ function serialize(){
 }
 function loadFrom(json){
   const d=JSON.parse(json);
-  if(!d||d.v!==1||!Array.isArray(d.terr)||d.terr.length!==MAPW*MAPH) throw new Error("Not a valid Embervale save.");
-  G={ v:1, seed:d.seed>>>0, day:d.day|0, cur:0, nextId:d.nextId|0,
-    players:d.players, heroes:d.heroes, objects:d.objects,
-    terr:Uint8Array.from(d.terr),
-    explored:[Uint8Array.from(d.explored[0]),Uint8Array.from(d.explored[1])],
-    visible:[new Uint8Array(MAPW*MAPH),new Uint8Array(MAPW*MAPH)],
-  };
-  UI.selected=null; UI.preview=null; UI.pending=null; anim=null;
-  renderTerrain(); rebuildOcc(); recomputeVisible();
-  const h=G.heroes.find(h=>h.owner===0);
-  if(h){ UI.selected=h.id; centerOn(h.x,h.y); }
-  minimapDirty=true; refreshUI();
+  const bad=m=>{ throw new Error(m); };
+  /* validate everything BEFORE touching the live game */
+  if(!d||d.v!==1) bad("Not a valid Embervale save.");
+  if(!Array.isArray(d.terr)||d.terr.length!==MAPW*MAPH||d.terr.some(t=>!(t>=0&&t<=5))) bad("Corrupt terrain data.");
+  if(!Array.isArray(d.players)||d.players.length!==2) bad("Corrupt player data.");
+  for(const p of d.players){ if(!p||typeof p!=="object") bad("Corrupt player data.");
+    for(const k of RES_KEYS) if(typeof p[k]!=="number"||!isFinite(p[k])) bad("Corrupt resource data."); }
+  if(!Array.isArray(d.heroes)) bad("Corrupt hero data.");
+  for(const h of d.heroes){
+    if(!h||!inMap(h.x|0,h.y|0)||(h.owner!==0&&h.owner!==1)) bad("Corrupt hero data.");
+    if(typeof h.mp!=="number"||!isFinite(h.mp)||typeof h.maxMp!=="number") bad("Corrupt hero data.");
+    h.fac=h.fac===1?1:0;
+    h.artifacts=Array.isArray(h.artifacts)? h.artifacts.filter(i=>Number.isInteger(i)&&i>=0&&i<ARTIFACTS.length):[];
+  }
+  if(!Array.isArray(d.objects)) bad("Corrupt object data.");
+  for(const o of d.objects){
+    if(!o||typeof o.t!=="string"||!inMap(o.x|0,o.y|0)) bad("Corrupt object data.");
+    if(o.t==="mine"&&!MINE_DEFS[o.sub]) bad("Corrupt mine data.");
+    if(o.t==="pile"&&!RES_NAME[o.sub]) bad("Corrupt pile data.");
+    if(o.t==="art"&&!(Number.isInteger(o.art)&&o.art>=0&&o.art<ARTIFACTS.length)) bad("Corrupt artifact data.");
+    if(o.t==="town") o.fac=o.fac===1?1:0;
+  }
+  if(!Array.isArray(d.explored)||d.explored.length!==2||
+     d.explored.some(a=>!Array.isArray(a)||a.length!==MAPW*MAPH)) bad("Corrupt fog data.");
+
+  const prevG=G, prevTerrain=terrainCanvas;
+  try{
+    G={ v:1, seed:d.seed>>>0, day:Math.max(1,d.day|0), cur:0, nextId:d.nextId|0,
+      players:d.players, heroes:d.heroes, objects:d.objects,
+      terr:Uint8Array.from(d.terr),
+      explored:[Uint8Array.from(d.explored[0]),Uint8Array.from(d.explored[1])],
+      visible:[new Uint8Array(MAPW*MAPH),new Uint8Array(MAPW*MAPH)],
+    };
+    UI.selected=null; UI.preview=null; UI.pending=null; anim=null;
+    if(aiTimer){ clearTimeout(aiTimer); aiTimer=null; }
+    renderTerrain(); rebuildOcc(); recomputeVisible();
+    const h=G.heroes.find(h=>h.owner===0);
+    if(h){ UI.selected=h.id; centerOn(h.x,h.y); }
+    minimapDirty=true; refreshUI();
+  }catch(err){
+    /* roll the live game back rather than leaving a half-loaded wreck */
+    G=prevG; terrainCanvas=prevTerrain;
+    if(G){ rebuildOcc(); recomputeVisible(); minimapDirty=true; refreshUI(); }
+    bad("save could not be applied.");
+  }
 }
 function showSave(){
   if(anim) skipAnim();
@@ -1263,7 +1311,12 @@ function endPointer(e){
   const p=pointers.get(e.pointerId);
   pointers.delete(e.pointerId);
   if(pinchState&&pointers.size<2){ pinchState=null; suppressTapUntil=performance.now()+350; }
-  if(pointers.size===0) dragState=null;
+  if(pointers.size===1){
+    /* pinch ended with one finger down: let it keep panning from here */
+    const [rp]=[...pointers.values()];
+    rp.sx=rp.x; rp.sy=rp.y; rp.moved=true;
+    dragState={ cx:cam.x, cy:cam.y, sx:rp.x, sy:rp.y };
+  } else if(pointers.size===0) dragState=null;
   if(p&&!p.moved&&e.type==="pointerup"&&performance.now()>suppressTapUntil){
     handleTap(p.x,p.y);
   }
@@ -1306,7 +1359,7 @@ function handleTap(sx,sy){
     return;
   }
   const obj=objectAt(t.x,t.y);
-  if(obj&&obj.t==="guard"&&G.visible[0][i]){
+  if(obj&&obj.t==="guard"){
     toast(`${obj.n} ${obj.cre} bar the way. Battles arrive in Phase 3.`,"bad");
     UI.preview=null; UI.pending=null; return;
   }
@@ -1327,26 +1380,39 @@ function handleTap(sx,sy){
 
 /* minimap interaction */
 function miniNav(e){
-  const r=mini.getBoundingClientRect();
-  const tx=(e.clientX-r.left)/r.width*MAPW, ty=(e.clientY-r.top)/r.height*MAPH;
+  const r=mini.getBoundingClientRect();   // includes the 2px CSS border on each edge
+  const tx=(e.clientX-r.left-2)/Math.max(1,r.width-4)*MAPW;
+  const ty=(e.clientY-r.top-2)/Math.max(1,r.height-4)*MAPH;
   centerOn(tx-0.5,ty-0.5);
 }
 mini.addEventListener("pointerdown",e=>{ mini.setPointerCapture(e.pointerId); miniNav(e); });
 mini.addEventListener("pointermove",e=>{ if(e.buttons) miniNav(e); });
 
+function zoomCenter(f){
+  const cx=viewW/2, cy=viewH/2;
+  const wx=cam.x+cx/cam.z, wy=cam.y+cy/cam.z;
+  cam.z=clamp(cam.z*f,0.7,3.2);
+  cam.x=wx-cx/cam.z; cam.y=wy-cy/cam.z; clampCam();
+}
 window.addEventListener("keydown",e=>{
   if(!G) return;
+  const t=e.target;
+  if(t&&(t.tagName==="INPUT"||t.tagName==="TEXTAREA")) return;      // typing, not commanding
+  if(!document.getElementById("menu").classList.contains("hide")) return;
+  if(modalBack.classList.contains("show")){
+    if(e.key==="Escape"&&!modalLocked) closeModal();
+    return;                                                          // no hotkeys under modals
+  }
   const step=90/cam.z;
   switch(e.key){
     case "ArrowLeft": cam.x-=step; clampCam(); break;
     case "ArrowRight": cam.x+=step; clampCam(); break;
     case "ArrowUp": cam.y-=step; clampCam(); break;
     case "ArrowDown": cam.y+=step; clampCam(); break;
-    case "+": case "=": cam.z=clamp(cam.z*1.15,0.7,3.2); clampCam(); break;
-    case "-": cam.z=clamp(cam.z/1.15,0.7,3.2); clampCam(); break;
+    case "+": case "=": zoomCenter(1.15); break;
+    case "-": zoomCenter(1/1.15); break;
     case "e": case "E": endTurn(); break;
     case "h": case "H": cycleHero(); break;
-    case "Escape": if(!modalLocked) closeModal(); break;
   }
 });
 function cycleHero(){
@@ -1361,6 +1427,8 @@ function cycleHero(){
    BOOT
    ========================================================================== */
 function startGame(seed){
+  anim=null;
+  if(aiTimer){ clearTimeout(aiTimer); aiTimer=null; }
   G=makeGame(seed);
   renderTerrain(); rebuildOcc(); recomputeVisible();
   const h=G.heroes.find(h=>h.owner===0);
@@ -1412,6 +1480,8 @@ window.EV={
     return executeMove(h,pv,true); },
   objectAt,heroAt,recomputeVisible,
   ui:UI,
+  get cam(){ return cam; },
+  tileToScreen, centerOn,
 };
 </script>
 </body>
