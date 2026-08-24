@@ -1,0 +1,1418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Embervale — Rival Crowns</title>
+<style>
+  :root{
+    --bg:#100d0a; --panel:#1c1611; --panel2:#241c14; --edge:#3a2d1e; --edge2:#57422a;
+    --gold:#c9a227; --gold2:#ffd95e; --ink:#d8c9a8; --ink2:#8f8168; --red:#a03c32; --blue:#3d6ea5;
+    --good:#7fb347; --warn:#d0873a;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+    font-family:"Courier New",ui-monospace,monospace;font-size:14px;user-select:none;-webkit-user-select:none}
+  #app{display:grid;grid-template-rows:auto 1fr;height:100%;}
+  /* ---- top bar ---- */
+  #topbar{display:flex;align-items:center;gap:10px;padding:5px 8px;background:linear-gradient(#2a2015,#1c1611);
+    border-bottom:2px solid var(--edge2);flex-wrap:wrap;z-index:5}
+  .res{display:flex;align-items:center;gap:4px;font-weight:bold;white-space:nowrap}
+  .res canvas{image-rendering:pixelated}
+  #dateBox{margin-left:auto;text-align:right;color:var(--gold2);font-weight:bold;white-space:nowrap}
+  #dateBox small{display:block;color:var(--ink2);font-weight:normal}
+  /* ---- main area ---- */
+  #main{display:grid;grid-template-columns:1fr 232px;min-height:0}
+  #mapwrap{position:relative;min-width:0;min-height:0;background:#05060a}
+  #map{position:absolute;inset:0;width:100%;height:100%;touch-action:none;image-rendering:pixelated;cursor:crosshair}
+  /* ---- side panel ---- */
+  #side{background:var(--panel);border-left:2px solid var(--edge2);display:flex;flex-direction:column;
+    gap:8px;padding:8px;overflow-y:auto;min-height:0}
+  .ptitle{color:var(--gold);font-weight:bold;letter-spacing:1px;border-bottom:1px solid var(--edge);padding-bottom:2px;font-size:12px}
+  #minimap{width:100%;image-rendering:pixelated;border:2px solid var(--edge2);background:#000;cursor:pointer;touch-action:none}
+  .card{background:var(--panel2);border:1px solid var(--edge);padding:6px;border-radius:2px;cursor:pointer}
+  .card:hover{border-color:var(--gold)}
+  .card.sel{border-color:var(--gold2);box-shadow:0 0 6px #c9a22755}
+  .card .nm{font-weight:bold}
+  .mpbar{height:6px;background:#0d0b08;border:1px solid var(--edge);margin-top:4px}
+  .mpbar i{display:block;height:100%;background:var(--good)}
+  .sub{color:var(--ink2);font-size:12px}
+  button{font-family:inherit;font-size:14px;background:linear-gradient(#3a2d1e,#241c14);color:var(--ink);
+    border:2px solid var(--edge2);padding:9px 10px;cursor:pointer;border-radius:2px;min-height:42px}
+  button:hover{border-color:var(--gold);color:var(--gold2)}
+  button:active{transform:translateY(1px)}
+  button.primary{background:linear-gradient(#6b4a1c,#4a3313);border-color:var(--gold);color:var(--gold2);font-weight:bold;letter-spacing:1px}
+  button:disabled{opacity:.45;cursor:default}
+  #btnRow{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  #endTurn{grid-column:1/3;font-size:16px}
+  /* ---- toasts ---- */
+  #toasts{position:absolute;left:8px;bottom:8px;display:flex;flex-direction:column;gap:5px;z-index:8;pointer-events:none;max-width:75%}
+  .toast{background:#1c1611ee;border:1px solid var(--edge2);border-left:3px solid var(--gold);padding:6px 9px;
+    font-size:13px;animation:tin .18s ease-out;border-radius:2px}
+  .toast.bad{border-left-color:var(--red)}
+  .toast.good{border-left-color:var(--good)}
+  @keyframes tin{from{opacity:0;transform:translateY(8px)}to{opacity:1}}
+  /* ---- modal ---- */
+  #modalback{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;z-index:20;padding:12px}
+  #modalback.show{display:flex}
+  #modal{background:var(--panel);border:3px double var(--edge2);max-width:520px;width:100%;max-height:88vh;
+    overflow-y:auto;padding:14px;border-radius:3px;box-shadow:0 0 40px #000}
+  #modal h2{color:var(--gold2);font-size:17px;margin-bottom:8px;letter-spacing:1px}
+  #modal .mrow{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  #modal .mrow button{flex:1}
+  #modal textarea{width:100%;height:120px;background:#0d0b08;color:var(--ink);border:1px solid var(--edge2);
+    font-family:inherit;font-size:11px;padding:6px;user-select:text;-webkit-user-select:text}
+  #modal table{width:100%;border-collapse:collapse;margin-top:6px}
+  #modal td{padding:3px 6px;border-bottom:1px solid var(--edge)}
+  #modal td:last-child{text-align:right;color:var(--gold2)}
+  .statgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px}
+  .statgrid .st{background:var(--panel2);border:1px solid var(--edge);padding:6px;text-align:center}
+  .statgrid .st b{display:block;color:var(--gold2);font-size:17px}
+  /* ---- menu overlay ---- */
+  #menu{position:fixed;inset:0;background:radial-gradient(ellipse at 50% 30%,#241c14,#0a0806 75%);z-index:30;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:18px;text-align:center}
+  #menu.hide{display:none}
+  #title{font-size:min(9vw,52px);color:var(--gold2);letter-spacing:4px;font-weight:bold;
+    text-shadow:0 0 22px #c9a22766,3px 3px 0 #000}
+  #subtitle{color:var(--ink2);letter-spacing:2px;margin-top:-8px}
+  #menu input{background:#0d0b08;border:2px solid var(--edge2);color:var(--ink);padding:9px;font-family:inherit;
+    font-size:14px;width:220px;text-align:center}
+  #menu .note{color:var(--ink2);font-size:12px;max-width:430px;line-height:1.5}
+  #phase{position:absolute;bottom:8px;right:10px;color:#4c4232;font-size:11px}
+  /* ---- mobile layout ---- */
+  @media (max-width:760px){
+    #main{grid-template-columns:1fr;grid-template-rows:1fr auto}
+    #side{border-left:none;border-top:2px solid var(--edge2);flex-direction:row;flex-wrap:nowrap;overflow-x:auto;
+      overflow-y:hidden;align-items:stretch;max-height:172px;padding:6px;gap:6px}
+    #side>*{flex:0 0 auto}
+    #minimap{width:150px;height:150px}
+    .pcol{display:flex;flex-direction:column;gap:5px;width:160px}
+    #btnRow{grid-template-columns:1fr 1fr;width:170px}
+    #topbar{font-size:12px;gap:7px}
+  }
+  .pcol{display:flex;flex-direction:column;gap:5px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar"></div>
+  <div id="main">
+    <div id="mapwrap">
+      <canvas id="map"></canvas>
+      <div id="toasts"></div>
+    </div>
+    <div id="side">
+      <canvas id="minimap" width="128" height="128"></canvas>
+      <div class="pcol" id="heroCol">
+        <div class="ptitle">HEROES</div>
+        <div id="heroList"></div>
+      </div>
+      <div class="pcol" id="townCol">
+        <div class="ptitle">TOWNS</div>
+        <div id="townList"></div>
+      </div>
+      <div class="pcol">
+        <div class="ptitle">COMMAND</div>
+        <div id="btnRow">
+          <button id="endTurn" class="primary">⌛ END TURN</button>
+          <button id="btnHero" title="Next hero">➤ Hero</button>
+          <button id="btnCenter" title="Center on selection">◎ Center</button>
+          <button id="btnSave">💾 Save</button>
+          <button id="btnLoad">📂 Load</button>
+          <button id="btnHelp">? Help</button>
+          <button id="btnMenu">☰ Menu</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="modalback"><div id="modal"></div></div>
+
+<div id="menu">
+  <div id="title">EMBERVALE</div>
+  <div id="subtitle">— RIVAL CROWNS —</div>
+  <div class="note">A realm torn between the <b style="color:var(--blue)">Order of the Dawnspire</b> and the
+    <b style="color:var(--red)">Duskmire Covenant</b>. Claim mines, gather treasure, and seize every enemy town.</div>
+  <input id="seedInput" placeholder="seed (blank = random)" inputmode="numeric">
+  <button class="primary" id="btnNew" style="width:220px">⚔ NEW CAMPAIGN</button>
+  <button id="btnResume" style="width:220px;display:none">↩ Resume</button>
+  <div class="note">Tap a tile to plot a route, tap again to march. Drag to pan · pinch or wheel to zoom.<br>
+    Keys: arrows pan · E end turn · H next hero · +/− zoom</div>
+  <div id="phase">Phase 1 build — map · movement · resources</div>
+</div>
+
+<script>
+"use strict";
+/* =============================================================================
+   EMBERVALE — RIVAL CROWNS
+   A single-file, offline, canvas-rendered turn-based strategy game.
+   Phase 1: adventure map, movement, fog of war, resources & income.
+   ========================================================================== */
+
+/* ---------------------------------- constants ---------------------------- */
+const MAPW = 32, MAPH = 32, TILE = 32, WORLD = MAPW * TILE;
+const TER = { GRASS:0, DIRT:1, FOREST:2, MOUNTAIN:3, WATER:4, ROAD:5 };
+const TER_COST = [100, 125, 175, 0, 0, 65];          // 0 = impassable
+const DIAG = 1.41;
+const BASE_MP = 1500;
+const SIGHT_HERO = 5.5, SIGHT_TOWN = 6.5, SIGHT_MINE = 3.5;
+const RES_KEYS = ["gold","wood","ore","moon","ember"];
+const RES_NAME = { gold:"Gold", wood:"Wood", ore:"Ore", moon:"Moonshard", ember:"Emberglass" };
+
+const FACTIONS = [
+  { name:"Order of the Dawnspire", short:"Dawnspire", color:"#3d6ea5", color2:"#7fb3ff",
+    heroNames:["Sir Aldric","Dame Yseult","Corwin the Grey","Elowen"] },
+  { name:"Duskmire Covenant", short:"Duskmire", color:"#a03c32", color2:"#ff8a6b",
+    heroNames:["Morwenna","Vekh the Hollow","Ashka","Drell Nightvow"] },
+];
+const TOWN_NAMES = [ ["Aldenfort","Brighthollow"], ["Gloomreach","Ashenkeep"] ];
+
+const MINE_DEFS = {
+  gold:  { name:"Gold Vault",     res:"gold",  amt:1000 },
+  wood:  { name:"Timber Camp",    res:"wood",  amt:2 },
+  ore:   { name:"Ore Quarry",     res:"ore",   amt:2 },
+  moon:  { name:"Moonshard Mine", res:"moon",  amt:1 },
+  ember: { name:"Emberglass Kiln",res:"ember", amt:1 },
+};
+
+/* Artifacts: collected in Phase 1, stat effects wired up in Phase 4. */
+const ARTIFACTS = [
+  { name:"Blade of the Ember Court", slot:"weapon", desc:"+2 Attack" },
+  { name:"Aegis of Pale Roots",      slot:"armor",  desc:"+2 Defense" },
+  { name:"Circlet of the Deep Moon", slot:"helm",   desc:"+2 Knowledge" },
+  { name:"Wandering Star Talisman",  slot:"misc",   desc:"+1 Power" },
+  { name:"Boots of the Grey Road",   slot:"misc",   desc:"+300 movement" },
+  { name:"Sigil of Quiet Thunder",   slot:"misc",   desc:"+1 Attack, +1 Defense" },
+];
+const GUARD_KINDS = ["Bramble Wolves","Barrow Wights","Mire Serpents","Stone Gnashers","Feral Harpies","Gloom Bats"];
+
+/* ------------------------------- tiny utilities --------------------------- */
+function mulberry32(a){ return function(){ a|=0; a=(a+0x6D2B79F5)|0;
+  let t=Math.imul(a^(a>>>15),1|a); t=(t+Math.imul(t^(t>>>7),61|t))^t;
+  return ((t^(t>>>14))>>>0)/4294967296; }; }
+function hash2(x,y,s){ let h=(Math.imul(x,374761393)+Math.imul(y,668265263)+Math.imul(s,974711))>>>0;
+  h=(h^(h>>>13))>>>0; h=Math.imul(h,1274126177)>>>0; return ((h^(h>>>16))>>>0)/4294967296; }
+const lerp=(a,b,t)=>a+(b-a)*t;
+const clamp=(v,a,b)=>v<a?a:(v>b?b:v);
+const idx=(x,y)=>y*MAPW+x;
+const inMap=(x,y)=>x>=0&&y>=0&&x<MAPW&&y<MAPH;
+const fmt=n=>n>=10000?((n/1000).toFixed(1).replace(/\.0$/,"")+"k"):(""+n);
+function pick(rnd,arr){ return arr[Math.floor(rnd()*arr.length)]; }
+
+/* ===== [SECTION: MAPGEN] — pure functions, no DOM =========================
+   generateWorld(seed) -> { terr:Uint8Array, objects:[], heroes:[], nextId }
+   The map is point-symmetric: tile i mirrors to 1023-i, so both sides get
+   identical terrain and object layouts. Side A (top-left) = AI player 1,
+   side B (bottom-right) = human player 0.
+   ========================================================================== */
+function vnoise(x,y,seed){
+  const xi=Math.floor(x), yi=Math.floor(y), xf=x-xi, yf=y-yi;
+  const sm=t=>t*t*(3-2*t);
+  return lerp(
+    lerp(hash2(xi,yi,seed),   hash2(xi+1,yi,seed),   sm(xf)),
+    lerp(hash2(xi,yi+1,seed), hash2(xi+1,yi+1,seed), sm(xf)), sm(yf));
+}
+function fbm(x,y,seed){
+  return 0.55*vnoise(x/7.3,y/7.3,seed) + 0.30*vnoise(x/3.4,y/3.4,seed+77) + 0.15*vnoise(x/1.7,y/1.7,seed+191);
+}
+
+function generateWorld(seed){
+  const rnd = mulberry32(seed);
+  const terr = new Uint8Array(MAPW*MAPH);
+  const objects = [];
+  let nextId = 1;
+  const objAt = new Int32Array(MAPW*MAPH).fill(-1);   // object index by tile
+
+  /* --- base terrain from noise, then mirrored --- */
+  for(let y=0;y<MAPH;y++) for(let x=0;x<MAPW;x++){
+    const e=fbm(x,y,seed), m=fbm(x,y,seed+5000);
+    let t=TER.GRASS;
+    if(e>0.615) t=TER.MOUNTAIN;
+    else if(e<0.365) t=TER.WATER;
+    else if(m>0.585) t=TER.FOREST;
+    else if(m<0.44) t=TER.DIRT;
+    terr[idx(x,y)]=t;
+  }
+  for(let i=0;i<MAPW*MAPH/2;i++) terr[MAPW*MAPH-1-i]=terr[i];   // point symmetry
+  for(let x=0;x<MAPW;x++){ terr[idx(x,0)]=TER.MOUNTAIN; terr[idx(x,MAPH-1)]=TER.MOUNTAIN; }
+  for(let y=0;y<MAPH;y++){ terr[idx(0,y)]=TER.MOUNTAIN; terr[idx(MAPW-1,y)]=TER.MOUNTAIN; }
+
+  /* set terrain on both a tile and its mirror (keeps symmetry through edits) */
+  function setT(x,y,t){ terr[idx(x,y)]=t; terr[MAPW*MAPH-1-idx(x,y)]=t; }
+  function clearArea(cx,cy,r,t){
+    for(let y=cy-r;y<=cy+r;y++) for(let x=cx-r;x<=cx+r;x++)
+      if(inMap(x,y)&&x>0&&y>0&&x<MAPW-1&&y<MAPH-1) setT(x,y,t);
+  }
+
+  /* --- add object + its mirrored twin (side A owner 1 -> side B owner 0) --- */
+  function addPair(o){
+    const a = Object.assign({}, o, { id:nextId++ });
+    const b = Object.assign({}, o, { id:nextId++, x:MAPW-1-o.x, y:MAPH-1-o.y });
+    if(o.owner===1) b.owner=0;
+    if(o.t==="town"){ b.fac=0; b.name=TOWN_NAMES[0][o.slot]; }
+    objects.push(a,b);
+    objAt[idx(a.x,a.y)]=objects.length-2; objAt[idx(b.x,b.y)]=objects.length-1;
+    return a;
+  }
+  const isFree=(x,y)=>{
+    if(!inMap(x,y)||x<2||y<2||x>=MAPW-2||y>=MAPH-2) return false;
+    const t=terr[idx(x,y)];
+    if(t===TER.MOUNTAIN||t===TER.WATER) return false;
+    for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++)
+      if(inMap(x+dx,y+dy)&&objAt[idx(x+dx,y+dy)]>=0) return false;
+    return true;
+  };
+  /* random free spot near (cx,cy) within radius r, on side A (x+y<30) */
+  function findSpot(cx,cy,r){
+    for(let tries=0;tries<400;tries++){
+      const x=cx+Math.floor(rnd()*(2*r+1))-r, y=cy+Math.floor(rnd()*(2*r+1))-r;
+      if(x+y>29) continue;
+      if(isFree(x,y)) return {x,y};
+      if(tries>250 && inMap(x,y) && x+y<=29 && objAt[idx(x,y)]<0 && x>1&&y>1&&x<MAPW-2&&y<MAPH-2){
+        setT(x,y,TER.GRASS); if(isFree(x,y)) return {x,y};
+      }
+    }
+    return null;
+  }
+
+  /* --- towns (side A pair; mirror makes the player's) --- */
+  clearArea(6,6,2,TER.GRASS); clearArea(14,10,2,TER.GRASS);
+  const townA1 = addPair({t:"town", x:6, y:6, owner:1, fac:1, slot:0, name:TOWN_NAMES[1][0]});
+  addPair({t:"town", x:14, y:10, owner:1, fac:1, slot:1, name:TOWN_NAMES[1][1]});
+
+  /* --- roads: main->second town, main->center (mirrored automatically) --- */
+  function carveRoad(x0,y0,x1,y1){
+    /* greedy walk toward target; blast through rock/water as road (bridges/passes) */
+    let x=x0,y=y0,guardCt=0;
+    while((x!==x1||y!==y1)&&guardCt++<200){
+      const dx=Math.sign(x1-x), dy=Math.sign(y1-y);
+      let nx=x,ny=y;
+      if(dx&&dy){ if(hash2(x,y,seed+31)<0.5) nx+=dx; else ny+=dy; }
+      else if(dx) nx+=dx; else ny+=dy;
+      if(objAt[idx(nx,ny)]>=0){                 // sidestep objects
+        if(dx&&ny+1<MAPH-1&&objAt[idx(x,ny+ (dy||1))]<0){ ny=y+(dy||1); nx=x; }
+        else { nx=x+(dx||1); ny=y; }
+        if(!inMap(nx,ny)||objAt[idx(nx,ny)]>=0){ x=nx;y=ny; continue; }
+      }
+      x=nx;y=ny;
+      if(x>0&&y>0&&x<MAPW-1&&y<MAPH-1) setT(x,y,TER.ROAD);
+    }
+  }
+  carveRoad(6,7,14,11); carveRoad(7,7,15,15); setT(15,15,TER.ROAD);
+
+  /* --- mines: 1 gold, 2 wood, 2 ore, 1 moonshard, 1 emberglass per side --- */
+  const mineAnchors = [ ["gold",10,4],["wood",4,11],["wood",13,7],["ore",9,13],["ore",4,4],["moon",18,4],["ember",5,18] ];
+  for(const [sub,ax,ay] of mineAnchors){
+    const s=findSpot(ax,ay,4); if(!s) continue;
+    clearArea(s.x,s.y,1,terr[idx(s.x,s.y)]===TER.ROAD?TER.ROAD:TER.GRASS);
+    addPair({t:"mine", sub, x:s.x, y:s.y, owner:-1});
+  }
+
+  /* --- resource piles, chests, artifacts, guards --- */
+  const pileKinds=["gold","gold","wood","wood","wood","ore","ore","ore","moon","ember"];
+  for(let i=0;i<10;i++){
+    const s=findSpot(3+Math.floor(rnd()*22),3+Math.floor(rnd()*22),5); if(!s) continue;
+    const sub=pileKinds[i%pileKinds.length];
+    const amt= sub==="gold" ? 500+100*Math.floor(rnd()*11) : (sub==="moon"||sub==="ember") ? 2+Math.floor(rnd()*3) : 4+Math.floor(rnd()*6);
+    addPair({t:"pile", sub, amt, x:s.x, y:s.y});
+  }
+  for(let i=0;i<6;i++){
+    const s=findSpot(3+Math.floor(rnd()*23),3+Math.floor(rnd()*23),5); if(!s) continue;
+    addPair({t:"chest", x:s.x, y:s.y});
+  }
+  for(let i=0;i<3;i++){
+    const s=findSpot(6+Math.floor(rnd()*18),6+Math.floor(rnd()*18),6); if(!s) continue;
+    addPair({t:"art", art:Math.floor(rnd()*ARTIFACTS.length), x:s.x, y:s.y});
+  }
+  for(let i=0;i<5;i++){
+    const s=findSpot(8+Math.floor(rnd()*16),8+Math.floor(rnd()*16),7); if(!s) continue;
+    addPair({t:"guard", cre:pick(rnd,GUARD_KINDS), n:8+Math.floor(rnd()*20), x:s.x, y:s.y});
+  }
+
+  /* --- starting heroes --- */
+  const heroes=[];
+  function addHeroPair(){
+    let hx=townA1.x+1, hy=townA1.y+1;
+    if(!isPassableT(terr,hx,hy)||objAt[idx(hx,hy)]>=0){ setT(hx,hy,TER.GRASS); }
+    heroes.push(mkHero(1, 1, hx, hy, nextId++));
+    heroes.push(mkHero(0, 0, MAPW-1-hx, MAPH-1-hy, nextId++));
+  }
+  addHeroPair();
+
+  /* --- connectivity: every interactive object reachable from side-A town --- */
+  const blocked=(x,y)=>{
+    const t=terr[idx(x,y)];
+    if(t===TER.MOUNTAIN||t===TER.WATER) return true;
+    return objAt[idx(x,y)]>=0;    // objects are stop-tiles; treat as walls for transit
+  };
+  function reachSet(sx,sy){
+    const seen=new Uint8Array(MAPW*MAPH); const q=[idx(sx,sy)]; seen[q[0]]=1;
+    while(q.length){
+      const c=q.pop(), cx=c%MAPW, cy=(c/MAPW)|0;
+      for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+        if(!dx&&!dy) continue;
+        const nx=cx+dx, ny=cy+dy;
+        if(!inMap(nx,ny)||seen[idx(nx,ny)]) continue;
+        seen[idx(nx,ny)]=1;                    // mark even blocked tiles as "touched"
+        if(!blocked(nx,ny)) q.push(idx(nx,ny));
+      }
+    }
+    return seen;
+  }
+  for(let pass=0;pass<8;pass++){
+    const seen=reachSet(townA1.x, townA1.y+1===MAPH?townA1.y:townA1.y+1);
+    let fixed=true;
+    for(const o of objects){
+      if(seen[idx(o.x,o.y)]) continue;
+      fixed=false;
+      /* carve a dirt line from the object toward the town until we hit reach */
+      let x=o.x,y=o.y,guardCt=0;
+      while(!seen[idx(x,y)]&&guardCt++<80){
+        const dx=Math.sign(townA1.x-x), dy=Math.sign(townA1.y-y);
+        if(dx&&dy){ if(hash2(x,y,seed+guardCt)<0.5) x+=dx; else y+=dy; }
+        else if(dx) x+=dx; else if(dy) y+=dy; else break;
+        if(x<=0||y<=0||x>=MAPW-1||y>=MAPH-1) break;
+        const t=terr[idx(x,y)];
+        if((t===TER.MOUNTAIN||t===TER.WATER)&&objAt[idx(x,y)]<0) setT(x,y,TER.DIRT);
+      }
+    }
+    if(fixed) break;
+  }
+  /* clear tile under each hero */
+  for(const h of heroes){ if(!isPassableT(terr,h.x,h.y)) setT(h.x,h.y,TER.GRASS); }
+
+  return { terr, objects, heroes, nextId };
+}
+function isPassableT(terr,x,y){ if(!inMap(x,y)) return false; const t=terr[idx(x,y)]; return t!==TER.MOUNTAIN&&t!==TER.WATER; }
+function mkHero(owner,fac,x,y,id){
+  return { id, owner, fac, name:FACTIONS[fac].heroNames[0], x, y,
+    mp:BASE_MP, maxMp:BASE_MP, level:1, xp:0,
+    atk:2, def:2, pow:1, know:1, mana:10, maxMana:10,
+    army:[], artifacts:[] };
+}
+/* ===== [END MAPGEN] ======================================================= */
+
+/* =============================================================================
+   SPRITES — every visual is drawn in code onto small offscreen canvases.
+   ========================================================================== */
+const SPR = {};   // name -> canvas
+
+function px(ctx,x,y,w,h,c){ ctx.fillStyle=c; ctx.fillRect(x,y,w,h); }
+function mkCanvas(w,h){ const c=document.createElement("canvas"); c.width=w; c.height=h; return c; }
+function spriteFromMap(rows,pal,scale){
+  scale=scale||2;
+  const w=rows[0].length, h=rows.length, c=mkCanvas(w*scale,h*scale), g=c.getContext("2d");
+  for(let y=0;y<h;y++) for(let x=0;x<rows[y].length;x++){
+    const ch=rows[y][x]; if(ch==="."||ch===" ") continue;
+    const col=pal[ch]; if(!col) continue;
+    g.fillStyle=col; g.fillRect(x*scale,y*scale,scale,scale);
+  }
+  return c;
+}
+
+const ART_PILE_GOLD = ["............","...gg.gg....",".gg.Gg.Ggg..","gGgggGggGgg.","gggGggGgggg.",".ggggggggg..","............"];
+const ART_PILE_WOOD = ["............",".kkkkkkkkk..","kwwwwwwwwwk.",".kkkkkkkkk..","kWWWWWWWWWk.",".kkkkkkkkk..","............"];
+const ART_PILE_ORE  = ["............","....ss......","..sSssss....",".sssSsssss..","ssSssssSss..",".sssssssss..","............"];
+const ART_CRYSTAL   = [".....C......","....CXC.....","...CXXXC....","..CXXXXX....","..CXXXXXC...","...CXXXC....","....CXC.....",".....C......"];
+const ART_CHEST     = ["............",".kkkkkkkkk..","kGGGGGGGGGk.","kwwwwkwwwwk.","kwwwkgkwwwk.","kwwwwkwwwwk.","kkkkkkkkkkk."];
+const ART_RELIC     = ["....gg......","...g..g.....","...g..g.....",".ggGXXGgg...","gXXXOXXXXg..",".ggXXXXgg...","...gXXg.....","....gg......"];
+const ART_WOLF      = ["................","....kk.........","...kkkk....k....","..kFFkk...kk....",".kFFFFkkkkkk....","kFFFFFFFFFFkk...",".kFFFFFFFFFFk...","..kFk..kFk......","..kk...kk......."];
+const ART_TREE      = ["....t....","...ttt...","..ttttt..","...ttt...","..ttttt..",".ttttttt.","..ttttt..",".ttttttt.","....w....","....w...."];
+const ART_FLAG      = ["kPPPP...","kPPPPP..","kPPPP...","kPP.....","k.......","k.......","k.......","k......."];
+
+function buildSprites(){
+  const c1={g:"#c9a227",G:"#ffd95e"};
+  SPR.pile_gold = spriteFromMap(ART_PILE_GOLD, c1, 2);
+  SPR.pile_wood = spriteFromMap(ART_PILE_WOOD, {k:"#3a2a18",w:"#8a6337",W:"#a67c48"}, 2);
+  SPR.pile_ore  = spriteFromMap(ART_PILE_ORE,  {s:"#6f6a63",S:"#9c968c"}, 2);
+  SPR.pile_moon = spriteFromMap(ART_CRYSTAL,   {C:"#7fd4ff",X:"#3a9bd6"}, 2);
+  SPR.pile_ember= spriteFromMap(ART_CRYSTAL,   {C:"#ffb35e",X:"#d65f2a"}, 2);
+  SPR.chest     = spriteFromMap(ART_CHEST,     {k:"#2a1c0e",G:"#c9a227",w:"#6d4a26",g:"#ffd95e"}, 2);
+  SPR.relic     = spriteFromMap(ART_RELIC,     {g:"#c9a227",X:"#b06bd4",O:"#f2e3ff"}, 2);
+  SPR.wolf      = spriteFromMap(ART_WOLF,      {k:"#15100c",F:"#5d4a38"}, 2);
+  SPR.tree      = spriteFromMap(ART_TREE,      {t:"#1e3d1c",w:"#3a2a18"}, 2);
+  SPR.tree2     = spriteFromMap(ART_TREE,      {t:"#2a4d24",w:"#3a2a18"}, 2);
+  SPR.flag = [];   // per-owner flags: 0 player, 1 AI, 2 neutral
+  ["#3d6ea5","#a03c32","#777777"].forEach((col,i)=>{
+    SPR.flag[i]=spriteFromMap(ART_FLAG,{k:"#2a1c0e",P:col},2);
+  });
+  SPR.hero=[];  // tinted per owner
+  const heroRows=[
+    "................",
+    "......kk........",
+    ".....kaak.......",
+    ".....kfak.......",
+    "..P.kaaak.......",
+    "..PPkaaakk......",
+    "..PPkaaaak..k...",
+    "...kHhhhhkkkmk..",
+    "..kHhhhhhhhhmk..",
+    "..kHhhhhhhhmmk..",
+    "..kHhkhhhkhhk...",
+    "..kHhk.khhk.....",
+    "...khk..khk.....",
+    "...kk...kk......",
+    "................",
+    "................"];
+  [0,1].forEach(o=>{
+    SPR.hero[o]=spriteFromMap(heroRows,{k:"#15100c",a:"#b8bcc4",f:"#d8b58a",
+      P:FACTIONS[o===0?0:1].color, H:"#4a3826", h:"#6b5233", m:"#2a1c0e"},2);
+  });
+  /* castles + mines drawn procedurally */
+  SPR.town=[ drawCastle(0), drawCastle(1) ];
+  SPR.mine={};
+  for(const sub of Object.keys(MINE_DEFS)) SPR.mine[sub]=drawMine(sub);
+}
+
+function drawCastle(fac){
+  const c=mkCanvas(64,56), g=c.getContext("2d");
+  const spiky = fac===1;
+  const stone = spiky? "#4a4048":"#6f6a72", light= spiky? "#5d5260":"#8f8a94", dark = spiky? "#332b36":"#4f4a55";
+  const roof  = spiky? "#5e2430":"#2f4a6d", roof2 = spiky? "#7d3040":"#3d6ea5";
+  const banner= FACTIONS[fac].color, banner2=FACTIONS[fac].color2;
+  const T=2; // pixel unit
+  function tower(x,top){
+    px(g,x,top+8,10,48-top-8,stone); px(g,x,top+8,2,48-top-8,light);
+    for(let yy=top+12;yy<44;yy+=8) px(g,x+3,yy,4,4,dark);          // windows
+    if(spiky){ for(let i=0;i<5;i++) px(g,x+i,top+8-i*1.6,10-2*i,2,i%2?roof:roof2); px(g,x+4,top-2,2,6,roof2); }
+    else { px(g,x-2,top+6,14,3,light);
+      for(let i=0;i<5;i++) px(g,x+i,top+6-i,10-2*i,1.2,roof2);
+      px(g,x-2,top+2,2,4,light); px(g,x+10,top+2,2,4,light); }
+    px(g,x+4,top-8,2,8,"#2a1c0e");                                 // banner pole
+    px(g,x+6,top-8,7,5,banner); px(g,x+6,top-7,7,1,banner2);
+  }
+  /* keep */
+  px(g,14,26,36,22,stone); px(g,14,26,36,2,light);
+  for(let xx=14;xx<50;xx+=6) px(g,xx,22,4,6,stone);                // crenellations
+  for(let xx=17;xx<48;xx+=8) px(g,xx,32,4,5,dark);                 // windows
+  /* gate */
+  px(g,27,36,10,12,dark); px(g,29,34,6,14,"#1c130b"); px(g,29,34,6,2,"#4a3826");
+  px(g,30,40,4,8,"#5a4126");
+  /* towers */
+  tower(4,14); tower(50,14);
+  if(spiky){ px(g,24,12,4,16,stone); px(g,36,12,4,16,stone); px(g,23,8,6,6,roof); px(g,35,8,6,6,roof); }
+  else { px(g,29,14,6,10,stone); for(let i=0;i<4;i++) px(g,28+i,14-i,8-2*i,1.4,roof2); }
+  return c;
+}
+function drawMine(sub){
+  const c=mkCanvas(48,32), g=c.getContext("2d");
+  if(sub==="wood"){
+    px(g,6,12,26,16,"#5a4126"); px(g,6,12,26,2,"#7a5636");         // hut
+    px(g,4,8,30,5,"#3a2a18");                                      // roof
+    px(g,10,18,6,10,"#2a1c0e");                                    // door
+    g.fillStyle="#9c968c"; g.beginPath(); g.arc(38,18,8,0,7); g.fill();   // blade
+    g.fillStyle="#6f6a63"; g.beginPath(); g.arc(38,18,5,0,7); g.fill();
+    px(g,36,16,4,4,"#2a2a2a");
+    px(g,20,20,10,3,"#8a6337"); px(g,20,24,12,3,"#a67c48");        // logs
+  } else {
+    px(g,4,20,40,10,"#57524c");                                    // rocky mound
+    px(g,8,12,32,10,"#6f6a63"); px(g,12,6,24,8,"#7d786f");
+    px(g,10,6,28,2,"#8f8a80");
+    px(g,20,16,10,14,"#191410");                                   // cave mouth
+    px(g,18,14,2,16,"#4a3826"); px(g,30,14,2,16,"#4a3826"); px(g,18,14,14,2,"#5a4126");
+    const gem={gold:["#ffd95e","#c9a227"],ore:["#9c968c","#6f6a63"],moon:["#7fd4ff","#3a9bd6"],ember:["#ffb35e","#d65f2a"]}[sub];
+    if(gem){ px(g,6,22,4,6,gem[1]); px(g,7,20,2,4,gem[0]); px(g,38,22,4,6,gem[1]); px(g,39,20,2,4,gem[0]);
+             px(g,12,24,3,4,gem[0]); }
+  }
+  return c;
+}
+
+/* resource icons for the top bar */
+function resIcon(kind){
+  const c=mkCanvas(16,16), g=c.getContext("2d");
+  const m={gold:ART_PILE_GOLD,wood:ART_PILE_WOOD,ore:ART_PILE_ORE,moon:ART_CRYSTAL,ember:ART_CRYSTAL}[kind];
+  const pal={gold:{g:"#c9a227",G:"#ffd95e"},wood:{k:"#3a2a18",w:"#8a6337",W:"#a67c48"},ore:{s:"#6f6a63",S:"#9c968c"},
+    moon:{C:"#7fd4ff",X:"#3a9bd6"},ember:{C:"#ffb35e",X:"#d65f2a"}}[kind];
+  const s=spriteFromMap(m,pal,1);
+  g.imageSmoothingEnabled=false;
+  g.drawImage(s,(16-s.width*1.3)/2,(16-s.height*1.3)/2,s.width*1.3,s.height*1.3);
+  return c;
+}
+
+/* =============================================================================
+   TERRAIN RENDER — pre-rendered 1024x1024 offscreen canvas
+   ========================================================================== */
+const TER_BASE = ["#3f6030","#6b4a2f","#365427","#63605c","#1d3a5f","#8a7148"];
+const TER_ALT  = ["#476b36","#7a5636","#3d5e2c","#726f69","#25476f","#9c8256"];
+let terrainCanvas=null;
+
+function renderTerrain(){
+  terrainCanvas = mkCanvas(WORLD, WORLD);
+  const g = terrainCanvas.getContext("2d");
+  for(let y=0;y<MAPH;y++) for(let x=0;x<MAPW;x++){
+    const t=G.terr[idx(x,y)], X=x*TILE, Y=y*TILE;
+    g.fillStyle=TER_BASE[t]; g.fillRect(X,Y,TILE,TILE);
+    /* speckle texture */
+    for(let i=0;i<7;i++){
+      const hx=hash2(x*7+i,y*13+i,G.seed), hy=hash2(x*13+i,y*7+i,G.seed+3);
+      g.fillStyle = hash2(x+i,y,G.seed+i)<0.5? TER_ALT[t] : "rgba(0,0,0,0.13)";
+      g.fillRect(X+((hx*TILE)|0)&~1, Y+((hy*TILE)|0)&~1, 2, 2);
+    }
+    if(t===TER.GRASS && hash2(x,y,G.seed+9)<0.18){    // grass tufts
+      g.fillStyle="#54793c";
+      const tx=X+4+((hash2(x,y,G.seed+10)*22)|0), ty=Y+4+((hash2(x,y,G.seed+11)*22)|0);
+      g.fillRect(tx,ty,2,4); g.fillRect(tx-2,ty+2,2,2); g.fillRect(tx+2,ty+2,2,2);
+    }
+    if(t===TER.FOREST){
+      const n=1+(hash2(x,y,G.seed+21)<0.5?1:0);
+      for(let i=0;i<n;i++){
+        const s= hash2(x+i,y,G.seed+22)<0.5? SPR.tree:SPR.tree2;
+        g.drawImage(s, X+2+((hash2(x,y,G.seed+23+i)*12)|0), Y+((hash2(x,y,G.seed+27+i)*8)|0)-2);
+      }
+    }
+    if(t===TER.MOUNTAIN){
+      /* jagged peaks, varied per tile so ranges look organic */
+      const base="#57534e", lit="#7d786f", snow="#c9ccc9";
+      const o1=(hash2(x,y,G.seed+61)*8)|0, o2=(hash2(y,x,G.seed+67)*7)|0;
+      const pk1=4+((hash2(x,y,G.seed+71)*6)|0), pk2=10+((hash2(x,y,G.seed+73)*6)|0);
+      g.fillStyle=base;
+      g.beginPath(); g.moveTo(X+1+o1,Y+30); g.lineTo(X+9+o1,Y+pk1); g.lineTo(X+19+o1,Y+30); g.closePath(); g.fill();
+      g.beginPath(); g.moveTo(X+13+o2,Y+30); g.lineTo(X+21+o2,Y+pk2); g.lineTo(X+29+o2,Y+30); g.closePath(); g.fill();
+      g.fillStyle=lit;
+      g.beginPath(); g.moveTo(X+9+o1,Y+pk1); g.lineTo(X+13+o1,Y+pk1+10); g.lineTo(X+9+o1,Y+pk1+10); g.closePath(); g.fill();
+      g.fillStyle=snow; g.fillRect(X+7+o1,Y+pk1,4,3);
+      if(hash2(x,y,G.seed+79)<0.6) g.fillRect(X+20+o2,Y+pk2,3,2);
+    }
+    if(t===TER.WATER){
+      g.fillStyle="#39628f";
+      for(let i=0;i<3;i++){
+        const wx=X+2+((hash2(x,y*3+i,G.seed+31)*24)|0), wy=Y+4+i*9+((hash2(x*3+i,y,G.seed+37)*5)|0);
+        g.fillRect(wx,wy,7,2);
+      }
+    }
+    if(t===TER.ROAD){
+      g.fillStyle="#7d6640"; g.fillRect(X,Y,TILE,TILE);
+      g.fillStyle="#9c8256";
+      for(let i=0;i<6;i++){
+        g.fillRect(X+((hash2(x*5+i,y,G.seed+41)*28)|0), Y+((hash2(x,y*5+i,G.seed+43)*28)|0), 3,2);
+      }
+      g.fillStyle="#6a5636";
+      for(let i=0;i<3;i++) g.fillRect(X+((hash2(x+i,y+i,G.seed+47)*28)|0), Y+((hash2(x*2,y+i,G.seed+53)*28)|0), 2,2);
+    }
+  }
+  /* soft edge blend: darken tile borders slightly for a knit look */
+  g.fillStyle="rgba(0,0,0,0.05)";
+  for(let y=0;y<MAPH;y++) g.fillRect(0,y*TILE,WORLD,1);
+  for(let x=0;x<MAPW;x++) g.fillRect(x*TILE,0,1,WORLD);
+}
+
+/* =============================================================================
+   FOG OF WAR — per-player explored (persistent) + visible (recomputed)
+   ========================================================================== */
+function revealCircle(p,cx,cy,r){
+  const ex=G.explored[p], r2=r*r;
+  for(let dy=-Math.ceil(r);dy<=r;dy++) for(let dx=-Math.ceil(r);dx<=r;dx++){
+    if(dx*dx+dy*dy>r2) continue;
+    const x=cx+dx,y=cy+dy;
+    if(inMap(x,y)) ex[idx(x,y)]=1;
+  }
+}
+function recomputeVisible(){
+  for(let p=0;p<2;p++){
+    const vis=G.visible[p]; vis.fill(0);
+    const paint=(cx,cy,r)=>{ const r2=r*r;
+      for(let dy=-Math.ceil(r);dy<=r;dy++) for(let dx=-Math.ceil(r);dx<=r;dx++){
+        if(dx*dx+dy*dy>r2) continue;
+        const x=cx+dx,y=cy+dy; if(inMap(x,y)){ vis[idx(x,y)]=1; G.explored[p][idx(x,y)]=1; }
+      }};
+    for(const h of G.heroes) if(h.owner===p) paint(h.x,h.y,SIGHT_HERO);
+    for(const o of G.objects){
+      if(o.t==="town"&&o.owner===p) paint(o.x,o.y,SIGHT_TOWN);
+      if(o.t==="mine"&&o.owner===p) paint(o.x,o.y,SIGHT_MINE);
+    }
+  }
+  minimapDirty=true;
+}
+
+/* =============================================================================
+   MAIN RENDER LOOP
+   ========================================================================== */
+const canvas=document.getElementById("map"), ctx=canvas.getContext("2d");
+const cam={x:0,y:0,z:1.4};
+let dpr=1, viewW=0, viewH=0;
+let minimapDirty=true;
+
+function fitCanvas(){
+  dpr=window.devicePixelRatio||1;
+  const r=canvas.getBoundingClientRect();
+  viewW=r.width; viewH=r.height;
+  const w=Math.round(r.width*dpr), h=Math.round(r.height*dpr);
+  if(canvas.width!==w||canvas.height!==h){ canvas.width=w; canvas.height=h; }
+}
+function clampCam(){
+  const vw=viewW/cam.z, vh=viewH/cam.z;
+  cam.x = vw>=WORLD ? (WORLD-vw)/2 : clamp(cam.x,0,WORLD-vw);
+  cam.y = vh>=WORLD ? (WORLD-vh)/2 : clamp(cam.y,0,WORLD-vh);
+}
+function centerOn(tx,ty){ cam.x=(tx+0.5)*TILE-viewW/cam.z/2; cam.y=(ty+0.5)*TILE-viewH/cam.z/2; clampCam(); }
+function screenToTile(sx,sy){
+  return { x:Math.floor((cam.x+sx/cam.z)/TILE), y:Math.floor((cam.y+sy/cam.z)/TILE) };
+}
+function tileToScreen(tx,ty){
+  return { x:((tx*TILE)-cam.x)*cam.z, y:((ty*TILE)-cam.y)*cam.z };
+}
+
+function draw(time){
+  if(!G) return;
+  fitCanvas(); clampCam();
+  const s=cam.z*dpr;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.fillStyle="#05060a"; ctx.fillRect(0,0,canvas.width,canvas.height);
+  ctx.setTransform(s,0,0,s,-cam.x*s,-cam.y*s);
+  ctx.imageSmoothingEnabled=false;
+  ctx.drawImage(terrainCanvas,0,0);
+
+  const ex=G.explored[0], vis=G.visible[0];
+  const x0=clamp(Math.floor(cam.x/TILE),0,MAPW-1), y0=clamp(Math.floor(cam.y/TILE),0,MAPH-1);
+  const x1=clamp(Math.ceil((cam.x+viewW/cam.z)/TILE),0,MAPW), y1=clamp(Math.ceil((cam.y+viewH/cam.z)/TILE),0,MAPH);
+
+  /* objects (drawn if explored), sorted by y for overlap */
+  const drawList=[];
+  for(const o of G.objects){
+    if(o.dead) continue;
+    if(!ex[idx(o.x,o.y)]) continue;
+    if(o.x<x0-2||o.x>x1+2||o.y<y0-2||o.y>y1+3) continue;
+    drawList.push(o);
+  }
+  for(const h of G.heroes){
+    if(h.owner!==0 && !vis[idx(h.x,h.y)]) continue;
+    if(h.x<x0-2||h.x>x1+2||h.y<y0-2||h.y>y1+2) continue;
+    drawList.push(h);
+  }
+  drawList.sort((a,b)=>(a.y-b.y)||((a.t?0:1)-(b.t?0:1)));
+
+  for(const o of drawList){
+    if(!o.t){ drawHero(o,time); continue; }
+    const X=o.x*TILE, Y=o.y*TILE;
+    if(o.t==="town"){
+      const spr=SPR.town[o.fac];
+      ctx.drawImage(spr, X-16, Y-spr.height+TILE);
+      ctx.drawImage(SPR.flag[o.owner<0?2:o.owner], X+TILE-10, Y-spr.height+TILE+2);
+    } else if(o.t==="mine"){
+      ctx.drawImage(SPR.mine[o.sub], X-8, Y-2);
+      ctx.drawImage(SPR.flag[o.owner<0?2:o.owner], X+TILE-14, Y-14);
+    } else if(o.t==="pile"){
+      ctx.drawImage(SPR["pile_"+o.sub], X+4, Y+10);
+    } else if(o.t==="chest"){
+      ctx.drawImage(SPR.chest, X+4, Y+12);
+    } else if(o.t==="art"){
+      const bob=Math.sin(time/400+o.x)*2;
+      ctx.drawImage(SPR.relic, X+8, Y+6+bob);
+    } else if(o.t==="guard"){
+      ctx.drawImage(SPR.wolf, X, Y+8);
+      /* little count tag */
+      ctx.fillStyle="rgba(10,8,6,0.75)"; ctx.fillRect(X+18,Y+22,13,9);
+      ctx.fillStyle="#d8c9a8"; ctx.font="8px monospace"; ctx.fillText(""+o.n, X+20, Y+29.5);
+    }
+  }
+
+  drawPathPreview(time);
+
+  /* fog overlay — one path per layer so adjacent rects union without seams */
+  ctx.beginPath();
+  for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++)
+    if(!ex[idx(x,y)]) ctx.rect(x*TILE-0.5,y*TILE-0.5,TILE+1,TILE+1);
+  ctx.fillStyle="#05060a"; ctx.fill();
+  ctx.beginPath();
+  for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++)
+    if(ex[idx(x,y)]&&!vis[idx(x,y)]) ctx.rect(x*TILE-0.5,y*TILE-0.5,TILE+1,TILE+1);
+  ctx.fillStyle="rgba(8,10,20,0.45)"; ctx.fill();
+
+  /* selection ring */
+  const h=selectedHero();
+  if(h){
+    const pulse=2+Math.sin(time/220)*1.5;
+    ctx.strokeStyle="#ffd95e"; ctx.lineWidth=2/cam.z;
+    const hx=(anim&&anim.hero===h)?anim.px:h.x*TILE, hy=(anim&&anim.hero===h)?anim.py:h.y*TILE;
+    ctx.strokeRect(hx+2-pulse, hy+2-pulse, TILE-4+2*pulse, TILE-4+2*pulse);
+  }
+
+  drawPathLabel();
+  drawMinimap();
+}
+
+function drawHero(h,time){
+  let X=h.x*TILE, Y=h.y*TILE;
+  if(anim && anim.hero===h){ X=anim.px; Y=anim.py; }
+  ctx.fillStyle="rgba(0,0,0,0.3)";
+  ctx.beginPath(); ctx.ellipse(X+16,Y+28,11,4,0,0,7); ctx.fill();
+  ctx.drawImage(SPR.hero[h.owner], X, Y-6);
+}
+
+/* path preview: dots colored by travel day + destination label */
+function drawPathPreview(time){
+  const pv=UI.preview;
+  if(!pv||!pv.steps.length) return;
+  const cols=["#8fe36b","#ead35e","#e08a4a","#d05a4a"];
+  for(let i=0;i<pv.steps.length;i++){
+    const st=pv.steps[i];
+    const c=cols[Math.min(st.day-1,3)];
+    ctx.fillStyle=c;
+    const r = (i===pv.steps.length-1)? 5:3;
+    ctx.beginPath(); ctx.arc(st.x*TILE+16, st.y*TILE+16, r,0,7); ctx.fill();
+    if(i===pv.steps.length-1){ ctx.strokeStyle="#0008"; ctx.lineWidth=1.5; ctx.stroke(); }
+  }
+}
+function drawPathLabel(){
+  const pv=UI.preview;
+  if(!pv||!pv.steps.length) return;
+  const last=pv.steps[pv.steps.length-1];
+  const sc=tileToScreen(last.x,last.y);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  const txt = pv.days>1? `${Math.round(pv.cost)} MP · ${pv.days} days` : `${Math.round(pv.cost)} MP`;
+  ctx.font="bold 12px monospace";
+  const w=ctx.measureText(txt).width+10;
+  let lx=clamp(sc.x+16-w/2,4,viewW-w-4), ly=clamp(sc.y-30,4,viewH-22);
+  ctx.fillStyle="rgba(16,13,10,0.88)"; ctx.fillRect(lx,ly,w,17);
+  ctx.strokeStyle="#57422a"; ctx.strokeRect(lx+0.5,ly+0.5,w-1,16);
+  ctx.fillStyle= pv.days>1? "#ead35e":"#8fe36b";
+  ctx.fillText(txt,lx+5,ly+12.5);
+  if(UI.pending && UI.pending.x===last.x && UI.pending.y===last.y){
+    ctx.fillStyle="#8f8168"; ctx.font="10px monospace";
+    ctx.fillText("tap again to march", lx, ly+28);
+  }
+}
+
+/* =============================================================================
+   MINIMAP
+   ========================================================================== */
+const mini=document.getElementById("minimap"), mctx=mini.getContext("2d");
+const MSC=4;  // 32*4 = 128
+const miniBuf=mkCanvas(128,128), mbctx=miniBuf.getContext("2d");
+function drawMinimap(){
+  if(minimapDirty){
+    minimapDirty=false;
+    const ex=G.explored[0], vis=G.visible[0];
+    for(let y=0;y<MAPH;y++) for(let x=0;x<MAPW;x++){
+      const i=idx(x,y);
+      if(!ex[i]){ mbctx.fillStyle="#05060a"; }
+      else { mbctx.fillStyle=TER_BASE[G.terr[i]]; }
+      mbctx.fillRect(x*MSC,y*MSC,MSC,MSC);
+      if(ex[i]&&!vis[i]){ mbctx.fillStyle="rgba(8,10,20,0.4)"; mbctx.fillRect(x*MSC,y*MSC,MSC,MSC); }
+    }
+    for(const o of G.objects){
+      if(o.dead||!ex[idx(o.x,o.y)]) continue;
+      if(o.t==="town"){ mbctx.fillStyle=o.owner<0?"#999":FACTIONS[o.owner===0?0:1].color2;
+        mbctx.fillRect(o.x*MSC-2,o.y*MSC-2,MSC+4,MSC+4); }
+      else if(o.t==="mine"){ mbctx.fillStyle=o.owner<0?"#aaa":(o.owner===0?"#7fb3ff":"#ff8a6b");
+        mbctx.fillRect(o.x*MSC,o.y*MSC,MSC,MSC); }
+    }
+    for(const h of G.heroes){
+      if(h.owner!==0&&!G.visible[0][idx(h.x,h.y)]) continue;
+      mbctx.fillStyle=h.owner===0?"#ffd95e":"#ff5a3c";
+      mbctx.fillRect(h.x*MSC-1,h.y*MSC-1,MSC+2,MSC+2);
+    }
+  }
+  mctx.drawImage(miniBuf,0,0);
+  /* viewport rectangle */
+  mctx.strokeStyle="#ffd95e"; mctx.lineWidth=1;
+  const vw=viewW/cam.z/TILE*MSC, vh=viewH/cam.z/TILE*MSC;
+  mctx.strokeRect(cam.x/TILE*MSC, cam.y/TILE*MSC, Math.min(vw,128), Math.min(vh,128));
+}
+
+/* =============================================================================
+   GAME STATE
+   ========================================================================== */
+let G=null;                 // serializable game state
+let anim=null;              // movement animation {hero,steps,i,px,py,t0,done}
+const UI={ selected:null, preview:null, pending:null };
+
+const occObj=new Int32Array(MAPW*MAPH);   // object array index or -1
+const occHero=new Int32Array(MAPW*MAPH);  // hero id or 0
+function rebuildOcc(){
+  occObj.fill(-1); occHero.fill(0);
+  G.objects.forEach((o,i)=>{ if(!o.dead) occObj[idx(o.x,o.y)]=i; });
+  for(const h of G.heroes) occHero[idx(h.x,h.y)]=h.id;
+}
+function objectAt(x,y){ const i=occObj[idx(x,y)]; return i<0?null:G.objects[i]; }
+function heroAt(x,y){ const id=occHero[idx(x,y)]; return id? G.heroes.find(h=>h.id===id):null; }
+function heroById(id){ return G.heroes.find(h=>h.id===id); }
+function selectedHero(){ return UI.selected? G.heroes.find(h=>h.id===UI.selected && h.owner===0):null; }
+const INTERACTIVE={pile:1,chest:1,art:1,mine:1,town:1};
+
+function makeGame(seed){
+  const w=generateWorld(seed);
+  return {
+    v:1, seed, day:1, cur:0, nextId:w.nextId,
+    players:[
+      { name:"you", fac:0, gold:10000, wood:20, ore:20, moon:5, ember:5, ai:false },
+      { name:"Duskmire", fac:1, gold:10000, wood:20, ore:20, moon:5, ember:5, ai:true },
+    ],
+    terr:w.terr, objects:w.objects, heroes:w.heroes,
+    explored:[new Uint8Array(MAPW*MAPH), new Uint8Array(MAPW*MAPH)],
+    visible:[new Uint8Array(MAPW*MAPH), new Uint8Array(MAPW*MAPH)],
+  };
+}
+
+/* =============================================================================
+   PATHFINDING — A* over 8 directions, terrain-cost weighted
+   ========================================================================== */
+const DIRS=[[1,0,1],[-1,0,1],[0,1,1],[0,-1,1],[1,1,DIAG],[1,-1,DIAG],[-1,1,DIAG],[-1,-1,DIAG]];
+function tileCost(x,y){ return TER_COST[G.terr[idx(x,y)]]; }
+function passableTransit(x,y){
+  if(!inMap(x,y)) return false;
+  if(!tileCost(x,y)) return false;
+  if(occObj[idx(x,y)]>=0) return false;
+  if(occHero[idx(x,y)]) return false;
+  return true;
+}
+function findPath(hero,tx,ty){
+  if(!inMap(tx,ty)) return null;
+  if(hero.x===tx&&hero.y===ty) return null;
+  const ti=idx(tx,ty);
+  /* destination legality */
+  const dObj=objectAt(tx,ty), dHero=heroAt(tx,ty);
+  if(dHero) return null;
+  if(dObj && !INTERACTIVE[dObj.t]) return null;
+  if(!dObj && !tileCost(tx,ty)) return null;
+  if(dObj && !tileCost(tx,ty)) return null;   // objects always sit on passable ground anyway
+
+  const N=MAPW*MAPH;
+  const gsc=new Float64Array(N).fill(Infinity);
+  const came=new Int16Array(N).fill(-1);
+  const closed=new Uint8Array(N);
+  /* tiny binary heap of [f, idx] */
+  const hf=[], hi=[];
+  function hpush(f,i){ hf.push(f); hi.push(i); let c=hf.length-1;
+    while(c>0){ const p=(c-1)>>1; if(hf[p]<=hf[c]) break;
+      [hf[p],hf[c]]=[hf[c],hf[p]]; [hi[p],hi[c]]=[hi[c],hi[p]]; c=p; } }
+  function hpop(){ const f=hf[0],i=hi[0]; const lf=hf.pop(),li=hi.pop();
+    if(hf.length){ hf[0]=lf; hi[0]=li; let c=0;
+      for(;;){ let l=2*c+1,r=l+1,m=c;
+        if(l<hf.length&&hf[l]<hf[m])m=l; if(r<hf.length&&hf[r]<hf[m])m=r;
+        if(m===c)break; [hf[m],hf[c]]=[hf[c],hf[m]]; [hi[m],hi[c]]=[hi[c],hi[m]]; c=m; } }
+    return i; }
+  const heur=(x,y)=>{ const dx=Math.abs(x-tx),dy=Math.abs(y-ty);
+    return 65*(Math.max(dx,dy)+0.41*Math.min(dx,dy)); };
+  const si=idx(hero.x,hero.y);
+  gsc[si]=0; hpush(heur(hero.x,hero.y),si);
+  while(hf.length){
+    const c=hpop();
+    if(closed[c]) continue; closed[c]=1;
+    if(c===ti) break;
+    const cx=c%MAPW, cy=(c/MAPW)|0;
+    for(const [dx,dy,m] of DIRS){
+      const nx=cx+dx, ny=cy+dy;
+      if(!inMap(nx,ny)) continue;
+      const ni=idx(nx,ny);
+      if(closed[ni]) continue;
+      if(ni!==ti){ if(!passableTransit(nx,ny)) continue; }
+      else if(!tileCost(nx,ny)) continue;
+      const step=tileCost(nx,ny)*m;
+      const ng=gsc[c]+step;
+      if(ng<gsc[ni]-1e-9){ gsc[ni]=ng; came[ni]=c; hpush(ng+heur(nx,ny),ni); }
+    }
+  }
+  if(came[ti]<0&&si!==ti) { if(gsc[ti]===Infinity) return null; }
+  /* reconstruct */
+  const steps=[]; let c=ti;
+  while(c!==si&&c>=0){ const x=c%MAPW,y=(c/MAPW)|0;
+    steps.push({x,y,cost:0}); c=came[c]; }
+  if(c!==si) return null;
+  steps.reverse();
+  let px=hero.x, py=hero.y;
+  for(const st of steps){
+    const diag=(st.x!==px&&st.y!==py);
+    st.cost=tileCost(st.x,st.y)*(diag?DIAG:1);
+    px=st.x; py=st.y;
+  }
+  return steps;
+}
+/* annotate steps with the day they'd be walked on (1 = this turn) */
+function computePreview(hero,tx,ty){
+  const steps=findPath(hero,tx,ty);
+  if(!steps) return null;
+  let mp=hero.mp, day=1, total=0;
+  for(const st of steps){
+    if(mp<st.cost){ day++; mp=hero.maxMp; }
+    if(mp<st.cost) return null;          // single step beyond a full day's MP (can't happen)
+    mp-=st.cost; st.day=day; total+=st.cost;
+  }
+  return { steps, cost:total, days:day, tx, ty };
+}
+
+/* =============================================================================
+   MOVEMENT + INTERACTIONS
+   ========================================================================== */
+const STEP_MS=130;
+function executeMove(hero,preview,instant){
+  const steps=preview.steps.filter(s=>s.day===1);
+  if(!steps.length){ toast("Not enough movement left today.","bad"); return false; }
+  UI.preview=null; UI.pending=null;
+  anim={ hero, steps, i:0, px:hero.x*TILE, py:hero.y*TILE, t:0, last:performance.now(), instant:!!instant };
+  if(instant) skipAnim();
+  return true;
+}
+function animTick(now){
+  if(!anim) return;
+  const a=anim, h=a.hero;
+  let dt=now-a.last; a.last=now;
+  while(dt>0&&anim){
+    const st=a.steps[a.i];
+    const need=STEP_MS-a.t;
+    const use=Math.min(dt,need);
+    a.t+=use; dt-=use;
+    const f=Math.min(a.t/STEP_MS,1);
+    a.px=lerp(h.x*TILE, st.x*TILE, f);
+    a.py=lerp(h.y*TILE, st.y*TILE, f);
+    if(f>=1){
+      /* arrive on tile */
+      occHero[idx(h.x,h.y)]=0;
+      h.x=st.x; h.y=st.y; h.mp-=st.cost; a.t=0; a.i++;
+      revealCircle(h.owner,h.x,h.y,SIGHT_HERO);
+      const obj=objectAt(h.x,h.y);
+      occHero[idx(h.x,h.y)]=h.id;
+      const lastStep = a.i>=a.steps.length;
+      if(obj){ anim=null; interact(h,obj); }
+      else if(lastStep){ anim=null; }
+      if(!anim){ recomputeVisible(); refreshUI(); return; }
+      a.px=h.x*TILE; a.py=h.y*TILE;
+    }
+  }
+}
+function skipAnim(){ if(anim) animTick(anim.last+1e9); }
+
+function gainRes(p,key,amt){ G.players[p][key]+=amt; }
+function interact(hero,obj){
+  const mine=obj.t==="mine";
+  if(obj.t==="pile"){
+    gainRes(hero.owner,obj.sub,obj.amt);
+    if(hero.owner===0) toast(`Found ${obj.amt} ${RES_NAME[obj.sub]}.`,"good");
+    killObject(obj);
+  } else if(obj.t==="chest"){
+    const tier=[[1000,500],[1500,750],[2000,1000]][Math.floor(Math.random()*3)];
+    if(hero.owner===0){
+      showModal(`<h2>Weathered Chest</h2>
+        <p class="sub">Inside lies a trove. Take the coin, or distribute it among the ranks for experience?</p>
+        <div class="mrow">
+          <button id="chGold">💰 ${tier[0]} Gold</button>
+          <button id="chXp">✦ ${tier[1]} XP</button>
+        </div>`, true);
+      document.getElementById("chGold").onclick=()=>{ gainRes(0,"gold",tier[0]); toast(`+${tier[0]} gold.`,"good"); closeModal(); refreshUI(); };
+      document.getElementById("chXp").onclick=()=>{ hero.xp+=tier[1]; toast(`${hero.name} gains ${tier[1]} XP.`,"good"); closeModal(); refreshUI(); };
+    } else gainRes(1,"gold",tier[0]);
+    killObject(obj);
+  } else if(obj.t==="art"){
+    hero.artifacts.push(obj.art);
+    if(hero.owner===0) toast(`${hero.name} takes the ${ARTIFACTS[obj.art].name}!`,"good");
+    killObject(obj);
+  } else if(mine){
+    if(obj.owner===hero.owner){ if(hero.owner===0) toast(`This ${MINE_DEFS[obj.sub].name} is already yours.`); }
+    else {
+      obj.owner=hero.owner;
+      const d=MINE_DEFS[obj.sub];
+      if(hero.owner===0) toast(`${d.name} claimed: +${d.amt} ${RES_NAME[d.res]}/day.`,"good");
+      minimapDirty=true;
+    }
+  } else if(obj.t==="town"){
+    if(obj.owner!==hero.owner){
+      obj.owner=hero.owner; minimapDirty=true;
+      if(hero.owner===0){
+        toast(`⚑ ${obj.name} has fallen to your banner!`,"good");
+        if(G.objects.filter(o=>o.t==="town").every(o=>o.owner===0))
+          toast("Every town in Embervale is yours. (Victory scoring arrives in Phase 5.)","good");
+      } else toast(`⚑ ${obj.name} was seized by the Duskmire Covenant!`,"bad");
+    } else if(hero.owner===0) toast(`${hero.name} rests at ${obj.name}. (Town screen arrives in Phase 2.)`);
+  }
+  recomputeVisible(); refreshUI();
+}
+function killObject(obj){ obj.dead=true; occObj[idx(obj.x,obj.y)]=-1;
+  G.objects.forEach((o,i)=>{ if(!o.dead) occObj[idx(o.x,o.y)]=i; }); minimapDirty=true; }
+
+/* =============================================================================
+   TURNS + ECONOMY
+   ========================================================================== */
+function incomeOf(p){
+  const inc={gold:0,wood:0,ore:0,moon:0,ember:0};
+  for(const o of G.objects){
+    if(o.dead) continue;
+    if(o.t==="town"&&o.owner===p) inc.gold+=1000;
+    if(o.t==="mine"&&o.owner===p){ const d=MINE_DEFS[o.sub]; inc[d.res]+=d.amt; }
+  }
+  return inc;
+}
+function applyIncome(){
+  for(let p=0;p<2;p++){
+    const inc=incomeOf(p);
+    for(const k of RES_KEYS) G.players[p][k]+=inc[k];
+  }
+}
+function dateParts(){
+  const t=G.day-1;
+  return { month:Math.floor(t/28)+1, week:Math.floor((t%28)/7)+1, day:t%7+1 };
+}
+function endTurn(){
+  if(!G||G.cur!==0||anim) return;
+  UI.preview=null; UI.pending=null;
+  G.cur=1; refreshUI();
+  /* Phase 1 AI: the Covenant holds its ground and banks its income.
+     Exploration, recruiting and raids arrive in Phase 5. */
+  setTimeout(newDay, 300);
+}
+function newDay(){
+  G.day++; G.cur=0;
+  applyIncome();
+  for(const h of G.heroes){ h.mp=h.maxMp; h.mana=Math.min(h.maxMana,h.mana+ (h.know*1)); }
+  const d=dateParts();
+  if(d.day===1) toast(`— A new week dawns (Month ${d.month}, Week ${d.week}). Dwellings will regrow from Phase 2 on. —`);
+  else toast(`Day ${d.day}, Week ${d.week}, Month ${d.month}. Income collected.`);
+  recomputeVisible(); refreshUI();
+}
+
+/* =============================================================================
+   TOASTS + MODALS
+   ========================================================================== */
+const toastsEl=document.getElementById("toasts");
+function toast(msg,cls){
+  const d=document.createElement("div");
+  d.className="toast"+(cls?" "+cls:""); d.textContent=msg;
+  toastsEl.appendChild(d);
+  while(toastsEl.children.length>4) toastsEl.firstChild.remove();
+  setTimeout(()=>{ d.style.transition="opacity .4s"; d.style.opacity="0"; setTimeout(()=>d.remove(),420); },3800);
+}
+const modalBack=document.getElementById("modalback"), modalEl=document.getElementById("modal");
+let modalLocked=false;
+function showModal(html,locked){ modalEl.innerHTML=html; modalLocked=!!locked; modalBack.classList.add("show"); }
+function closeModal(){ modalBack.classList.remove("show"); modalLocked=false; }
+modalBack.addEventListener("pointerdown",e=>{ if(e.target===modalBack&&!modalLocked) closeModal(); });
+
+/* =============================================================================
+   UI PANELS
+   ========================================================================== */
+const topbar=document.getElementById("topbar");
+const resEls={};
+function initTopbar(){
+  topbar.innerHTML="";
+  for(const k of RES_KEYS){
+    const s=document.createElement("div"); s.className="res"; s.title=RES_NAME[k];
+    s.appendChild(resIcon(k));
+    const v=document.createElement("span"); v.textContent="0"; s.appendChild(v);
+    const inc=document.createElement("small"); inc.style.color="#8f8168"; s.appendChild(inc);
+    resEls[k]={v,inc};
+    topbar.appendChild(s);
+  }
+  const dt=document.createElement("div"); dt.id="dateBox"; topbar.appendChild(dt);
+  resEls.date=dt;
+}
+function refreshUI(){
+  if(!G) return;
+  const inc=incomeOf(0);
+  for(const k of RES_KEYS){
+    resEls[k].v.textContent=fmt(G.players[0][k]);
+    resEls[k].inc.textContent= inc[k]? ` +${inc[k]}`:"";
+  }
+  const d=dateParts();
+  resEls.date.innerHTML=`Day ${d.day} · Week ${d.week} · Month ${d.month}<small>${G.cur===0?"Your move, commander":"Duskmire is scheming…"}</small>`;
+  /* hero list */
+  const hl=document.getElementById("heroList"); hl.innerHTML="";
+  for(const h of G.heroes.filter(h=>h.owner===0)){
+    const c=document.createElement("div");
+    c.className="card"+(UI.selected===h.id?" sel":"");
+    c.innerHTML=`<div class="nm">🛡 ${h.name}</div>
+      <div class="sub">Lv ${h.level} · ${Math.round(h.mp)} MP</div>
+      <div class="mpbar"><i style="width:${Math.round(100*h.mp/h.maxMp)}%"></i></div>`;
+    c.onclick=()=>{ if(UI.selected===h.id){ openHeroPanel(h); } else { UI.selected=h.id; centerOn(h.x,h.y); refreshUI(); } };
+    hl.appendChild(c);
+  }
+  if(!G.heroes.some(h=>h.owner===0)) hl.innerHTML=`<div class="sub">No heroes. Taverns open in Phase 2.</div>`;
+  /* town list */
+  const tl=document.getElementById("townList"); tl.innerHTML="";
+  for(const t of G.objects.filter(o=>o.t==="town"&&o.owner===0)){
+    const c=document.createElement("div"); c.className="card";
+    c.innerHTML=`<div class="nm" style="color:${FACTIONS[t.fac].color2}">⌂ ${t.name}</div>
+      <div class="sub">${FACTIONS[t.fac].short} · +1000g/day</div>`;
+    c.onclick=()=>{ centerOn(t.x,t.y); openTownPanel(t); };
+    tl.appendChild(c);
+  }
+  const et=document.getElementById("endTurn");
+  et.disabled = G.cur!==0;
+}
+function openHeroPanel(h){
+  const arts = h.artifacts.length
+    ? h.artifacts.map(i=>`<tr><td>◆ ${ARTIFACTS[i].name}</td><td>${ARTIFACTS[i].desc}*</td></tr>`).join("")
+    : `<tr><td class="sub" colspan="2">No artifacts carried.</td></tr>`;
+  showModal(`<h2>🛡 ${h.name}</h2>
+    <div class="sub">${FACTIONS[h.fac].name} · Level ${h.level} · ${h.xp} XP (level-ups arrive in Phase 4)</div>
+    <div class="statgrid">
+      <div class="st">Attack<b>${h.atk}</b></div><div class="st">Defense<b>${h.def}</b></div>
+      <div class="st">Power<b>${h.pow}</b></div><div class="st">Knowledge<b>${h.know}</b></div>
+      <div class="st">Movement<b>${Math.round(h.mp)}/${h.maxMp}</b></div><div class="st">Mana<b>${h.mana}/${h.maxMana}</b></div>
+    </div>
+    <table>${arts}</table>
+    <p class="sub" style="margin-top:6px">*Artifact bonuses and army slots activate in Phase 4; spellbook in Phase 4.</p>
+    <div class="mrow"><button onclick="closeModal()">Close</button></div>`);
+}
+function openTownPanel(t){
+  showModal(`<h2 style="color:${FACTIONS[t.fac].color2}">⌂ ${t.name}</h2>
+    <div class="sub">${FACTIONS[t.fac].name}</div>
+    <table>
+      <tr><td>Daily income</td><td>+1000 gold</td></tr>
+      <tr><td>Garrison</td><td>— (Phase 2)</td></tr>
+      <tr><td>Buildings</td><td>Village Hall (build tree arrives in Phase 2)</td></tr>
+    </table>
+    <div class="mrow"><button onclick="closeModal()">Close</button></div>`);
+}
+function showHelp(){
+  showModal(`<h2>How to play — Phase 1</h2>
+    <table>
+    <tr><td>Move</td><td>tap/click a tile → route preview, tap again → march</td></tr>
+    <tr><td>Pan</td><td>drag the map (or arrow keys)</td></tr>
+    <tr><td>Zoom</td><td>pinch, mouse wheel, or +/−</td></tr>
+    <tr><td>Collect</td><td>walk onto piles, chests, relics</td></tr>
+    <tr><td>Mines</td><td>walk onto a mine to claim its daily yield</td></tr>
+    <tr><td>Towns</td><td>walk into an enemy town to capture it</td></tr>
+    <tr><td>Guards</td><td>neutral packs block their tile — battles arrive in Phase 3</td></tr>
+    <tr><td>End turn</td><td>⌛ button or E — restores movement, pays income</td></tr>
+    </table>
+    <div class="mrow"><button onclick="closeModal()">Close</button></div>`);
+}
+
+/* =============================================================================
+   SAVE / LOAD (JSON export-import; no storage APIs)
+   ========================================================================== */
+function serialize(){
+  return JSON.stringify({
+    v:1, seed:G.seed, day:G.day, cur:G.cur, nextId:G.nextId,
+    players:G.players, heroes:G.heroes,
+    objects:G.objects.filter(o=>!o.dead),
+    terr:Array.from(G.terr),
+    explored:[Array.from(G.explored[0]),Array.from(G.explored[1])],
+  });
+}
+function loadFrom(json){
+  const d=JSON.parse(json);
+  if(!d||d.v!==1||!Array.isArray(d.terr)||d.terr.length!==MAPW*MAPH) throw new Error("Not a valid Embervale save.");
+  G={ v:1, seed:d.seed>>>0, day:d.day|0, cur:0, nextId:d.nextId|0,
+    players:d.players, heroes:d.heroes, objects:d.objects,
+    terr:Uint8Array.from(d.terr),
+    explored:[Uint8Array.from(d.explored[0]),Uint8Array.from(d.explored[1])],
+    visible:[new Uint8Array(MAPW*MAPH),new Uint8Array(MAPW*MAPH)],
+  };
+  UI.selected=null; UI.preview=null; UI.pending=null; anim=null;
+  renderTerrain(); rebuildOcc(); recomputeVisible();
+  const h=G.heroes.find(h=>h.owner===0);
+  if(h){ UI.selected=h.id; centerOn(h.x,h.y); }
+  minimapDirty=true; refreshUI();
+}
+function showSave(){
+  if(anim) skipAnim();
+  showModal(`<h2>Export save</h2>
+    <p class="sub">Copy this string somewhere safe. Paste it into Load to resume.</p>
+    <textarea id="saveTa" readonly></textarea>
+    <div class="mrow"><button id="copySave">Copy to clipboard</button><button onclick="closeModal()">Close</button></div>`);
+  const ta=document.getElementById("saveTa"); ta.value=serialize();
+  document.getElementById("copySave").onclick=()=>{
+    ta.select(); ta.setSelectionRange(0,99999999);
+    try{ navigator.clipboard?navigator.clipboard.writeText(ta.value):document.execCommand("copy"); toast("Save copied.","good"); }
+    catch(e){ toast("Select the text and copy manually.","bad"); }
+  };
+}
+function showLoad(){
+  showModal(`<h2>Import save</h2>
+    <p class="sub">Paste a save string exported earlier.</p>
+    <textarea id="loadTa" placeholder='{"v":1,...}'></textarea>
+    <div class="mrow"><button id="doLoad" class="primary">Load</button><button onclick="closeModal()">Cancel</button></div>`);
+  document.getElementById("doLoad").onclick=()=>{
+    try{ loadFrom(document.getElementById("loadTa").value.trim()); closeModal();
+      document.getElementById("menu").classList.add("hide"); toast("Save restored.","good"); }
+    catch(e){ toast("Load failed: "+e.message,"bad"); }
+  };
+}
+
+/* =============================================================================
+   INPUT — pointer pan/pinch/tap + mouse hover + keys + wheel
+   ========================================================================== */
+const pointers=new Map();
+let dragState=null, pinchState=null, suppressTapUntil=0;
+
+canvas.addEventListener("pointerdown",e=>{
+  canvas.setPointerCapture(e.pointerId);
+  pointers.set(e.pointerId,{x:e.offsetX,y:e.offsetY,sx:e.offsetX,sy:e.offsetY,moved:false});
+  if(pointers.size===2){
+    const [a,b]=[...pointers.values()];
+    pinchState={ d0:Math.hypot(a.x-b.x,a.y-b.y), z0:cam.z };
+    dragState=null;
+  } else if(pointers.size===1){
+    dragState={ cx:cam.x, cy:cam.y, sx:e.offsetX, sy:e.offsetY };
+  }
+});
+canvas.addEventListener("pointermove",e=>{
+  const p=pointers.get(e.pointerId);
+  if(p){
+    p.x=e.offsetX; p.y=e.offsetY;
+    if(Math.hypot(p.x-p.sx,p.y-p.sy)>9) p.moved=true;
+    if(pinchState&&pointers.size===2){
+      const [a,b]=[...pointers.values()];
+      const d=Math.hypot(a.x-b.x,a.y-b.y);
+      const mx=(a.x+b.x)/2, my=(a.y+b.y)/2;
+      const wx=cam.x+mx/cam.z, wy=cam.y+my/cam.z;
+      cam.z=clamp(pinchState.z0*d/Math.max(20,pinchState.d0),0.7,3.2);
+      cam.x=wx-mx/cam.z; cam.y=wy-my/cam.z; clampCam();
+    } else if(dragState&&p.moved){
+      cam.x=dragState.cx-(p.x-dragState.sx)/cam.z;
+      cam.y=dragState.cy-(p.y-dragState.sy)/cam.z; clampCam();
+    }
+  } else if(e.pointerType==="mouse"&&e.buttons===0){
+    /* hover route preview */
+    const t=screenToTile(e.offsetX,e.offsetY);
+    hoverPreview(t.x,t.y);
+  }
+});
+function endPointer(e){
+  const p=pointers.get(e.pointerId);
+  pointers.delete(e.pointerId);
+  if(pinchState&&pointers.size<2){ pinchState=null; suppressTapUntil=performance.now()+350; }
+  if(pointers.size===0) dragState=null;
+  if(p&&!p.moved&&e.type==="pointerup"&&performance.now()>suppressTapUntil){
+    handleTap(p.x,p.y);
+  }
+}
+canvas.addEventListener("pointerup",endPointer);
+canvas.addEventListener("pointercancel",endPointer);
+canvas.addEventListener("wheel",e=>{
+  e.preventDefault();
+  const wx=cam.x+e.offsetX/cam.z, wy=cam.y+e.offsetY/cam.z;
+  cam.z=clamp(cam.z*Math.exp(-e.deltaY*0.0012),0.7,3.2);
+  cam.x=wx-e.offsetX/cam.z; cam.y=wy-e.offsetY/cam.z; clampCam();
+},{passive:false});
+
+let lastHover=-1;
+function hoverPreview(tx,ty){
+  if(!G||G.cur!==0||anim) return;
+  const h=selectedHero(); if(!h) return;
+  const i=inMap(tx,ty)?idx(tx,ty):-1;
+  if(i===lastHover) return; lastHover=i;
+  if(i<0||!G.explored[0][i]){ if(!UI.pending) UI.preview=null; return; }
+  const pv=computePreview(h,tx,ty);
+  if(pv) UI.preview=pv;
+  else if(!UI.pending) UI.preview=null;
+}
+
+function handleTap(sx,sy){
+  if(!G||G.cur!==0) return;
+  if(anim){ skipAnim(); return; }
+  const t=screenToTile(sx,sy);
+  if(!inMap(t.x,t.y)) return;
+  const i=idx(t.x,t.y);
+  if(!G.explored[0][i]){ toast("Unexplored lands — send a hero to scout."); return; }
+
+  const tapHero=heroAt(t.x,t.y);
+  if(tapHero){
+    if(tapHero.owner===0){
+      if(UI.selected===tapHero.id) openHeroPanel(tapHero);
+      else { UI.selected=tapHero.id; UI.preview=null; UI.pending=null; refreshUI(); }
+    } else toast("An enemy hero. Battles arrive in Phase 3.","bad");
+    return;
+  }
+  const obj=objectAt(t.x,t.y);
+  if(obj&&obj.t==="guard"&&G.visible[0][i]){
+    toast(`${obj.n} ${obj.cre} bar the way. Battles arrive in Phase 3.`,"bad");
+    UI.preview=null; UI.pending=null; return;
+  }
+  const h=selectedHero();
+  if(!h){ toast("Select one of your heroes first."); return; }
+  if(t.x===h.x&&t.y===h.y){ openHeroPanel(h); return; }
+
+  if(UI.pending&&UI.pending.x===t.x&&UI.pending.y===t.y){
+    const pv=computePreview(h,t.x,t.y);   // recompute: hover may have replaced the preview
+    if(pv) executeMove(h,pv);
+    else { toast("No route there.","bad"); UI.preview=null; UI.pending=null; }
+    return;
+  }
+  const pv=computePreview(h,t.x,t.y);
+  if(!pv){ toast("No route there.","bad"); UI.preview=null; UI.pending=null; return; }
+  UI.preview=pv; UI.pending={x:t.x,y:t.y};
+}
+
+/* minimap interaction */
+function miniNav(e){
+  const r=mini.getBoundingClientRect();
+  const tx=(e.clientX-r.left)/r.width*MAPW, ty=(e.clientY-r.top)/r.height*MAPH;
+  centerOn(tx-0.5,ty-0.5);
+}
+mini.addEventListener("pointerdown",e=>{ mini.setPointerCapture(e.pointerId); miniNav(e); });
+mini.addEventListener("pointermove",e=>{ if(e.buttons) miniNav(e); });
+
+window.addEventListener("keydown",e=>{
+  if(!G) return;
+  const step=90/cam.z;
+  switch(e.key){
+    case "ArrowLeft": cam.x-=step; clampCam(); break;
+    case "ArrowRight": cam.x+=step; clampCam(); break;
+    case "ArrowUp": cam.y-=step; clampCam(); break;
+    case "ArrowDown": cam.y+=step; clampCam(); break;
+    case "+": case "=": cam.z=clamp(cam.z*1.15,0.7,3.2); clampCam(); break;
+    case "-": cam.z=clamp(cam.z/1.15,0.7,3.2); clampCam(); break;
+    case "e": case "E": endTurn(); break;
+    case "h": case "H": cycleHero(); break;
+    case "Escape": if(!modalLocked) closeModal(); break;
+  }
+});
+function cycleHero(){
+  const mine=G.heroes.filter(h=>h.owner===0);
+  if(!mine.length) return;
+  const at=mine.findIndex(h=>h.id===UI.selected);
+  const h=mine[(at+1)%mine.length];
+  UI.selected=h.id; centerOn(h.x,h.y); refreshUI();
+}
+
+/* =============================================================================
+   BOOT
+   ========================================================================== */
+function startGame(seed){
+  G=makeGame(seed);
+  renderTerrain(); rebuildOcc(); recomputeVisible();
+  const h=G.heroes.find(h=>h.owner===0);
+  UI.selected=h?h.id:null; UI.preview=null; UI.pending=null;
+  fitCanvas();
+  cam.z=clamp(Math.min(viewW,viewH)/(13*TILE),0.9,2.0);   // ~13 tiles across on any screen
+  if(h) centerOn(h.x,h.y);
+  minimapDirty=true;
+  initTopbar(); refreshUI();
+  document.getElementById("menu").classList.add("hide");
+  toast(`Month 1, Week 1, Day 1 — the banners of Embervale are raised. Seed ${seed}.`);
+  toast("Tap a tile to plot a route; tap again to march.");
+}
+
+document.getElementById("btnNew").onclick=()=>{
+  const v=document.getElementById("seedInput").value.trim();
+  const seed=v? (parseInt(v,10)>>>0)||1 : (Math.floor(Math.random()*1e9)>>>0);
+  startGame(seed);
+};
+document.getElementById("btnResume").onclick=()=>{ document.getElementById("menu").classList.add("hide"); };
+document.getElementById("btnMenu").onclick=()=>{
+  const m=document.getElementById("menu");
+  m.classList.remove("hide");
+  document.getElementById("btnResume").style.display=G?"block":"none";
+};
+document.getElementById("endTurn").onclick=endTurn;
+document.getElementById("btnHero").onclick=cycleHero;
+document.getElementById("btnCenter").onclick=()=>{ const h=selectedHero(); if(h) centerOn(h.x,h.y); };
+document.getElementById("btnSave").onclick=showSave;
+document.getElementById("btnLoad").onclick=showLoad;
+document.getElementById("btnHelp").onclick=showHelp;
+window.closeModal=closeModal;
+
+buildSprites();
+initTopbar();
+requestAnimationFrame(function loop(t){
+  if(anim) animTick(performance.now());
+  draw(t);
+  requestAnimationFrame(loop);
+});
+
+/* test/debug API (also used by later-phase AI development) */
+window.EV={
+  get G(){ return G; },
+  startGame, endTurn, computePreview, findPath, serialize, loadFrom,
+  selectHero:id=>{ UI.selected=id; },
+  moveTo:(x,y)=>{ const h=selectedHero(); if(!h) return false;
+    const pv=computePreview(h,x,y); if(!pv) return false;
+    return executeMove(h,pv,true); },
+  objectAt,heroAt,recomputeVisible,
+  ui:UI,
+};
+</script>
+</body>
+</html>
