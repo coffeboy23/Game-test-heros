@@ -95,6 +95,27 @@
   .rrow .avail{color:var(--gold2)}
   .trow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:5px;font-size:12px}
   .trow button{min-height:30px;padding:3px 8px;font-size:12px}
+  /* ---- battle overlay ---- */
+  #battle{position:fixed;inset:0;background:radial-gradient(ellipse at 50% 40%,#20261a,#0c0f0a 80%);
+    z-index:18;display:none;flex-direction:column;padding:6px;gap:5px}
+  #battle.show{display:flex}
+  #bhead{display:flex;justify-content:space-between;color:var(--gold2);font-weight:bold;letter-spacing:1px;padding:0 4px}
+  #bhead #bround{color:var(--ink2);font-weight:normal}
+  #bturnbar{display:flex;gap:3px;align-items:center;min-height:34px;overflow-x:hidden;padding:0 4px}
+  #bturnbar .tb{width:32px;height:32px;background:#0d0b08;border:1px solid var(--edge);display:flex;
+    align-items:center;justify-content:center;position:relative;flex:0 0 auto}
+  #bturnbar .tb.cur{border-color:var(--gold2);box-shadow:0 0 6px #c9a22788}
+  #bturnbar .tb.foe{border-bottom:3px solid var(--red)}
+  #bturnbar .tb.ally{border-bottom:3px solid var(--blue)}
+  #bturnbar .tb canvas{image-rendering:pixelated;width:22px;height:22px}
+  #bwrap{flex:1;min-height:0;display:flex;align-items:center;justify-content:center}
+  #bcanvas{max-width:100%;max-height:100%;touch-action:manipulation;image-rendering:pixelated}
+  #bfoot{display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap}
+  #bbtns{display:flex;gap:6px}
+  #bbtns button{min-height:38px}
+  #bbtns button.on{border-color:var(--gold2);color:var(--gold2)}
+  #blog{flex:1;min-width:180px;font-size:11.5px;color:var(--ink2);line-height:1.45;max-height:72px;overflow:hidden}
+  #blog b{color:var(--ink)}
   /* ---- menu overlay ---- */
   #menu{position:fixed;inset:0;background:radial-gradient(ellipse at 50% 30%,#241c14,#0a0806 75%);z-index:30;
     display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:18px;text-align:center}
@@ -156,6 +177,20 @@
   </div>
 </div>
 
+<div id="battle">
+  <div id="bhead"><span id="btitle"></span><span id="bround"></span></div>
+  <div id="bturnbar"></div>
+  <div id="bwrap"><canvas id="bcanvas"></canvas></div>
+  <div id="bfoot">
+    <div id="bbtns">
+      <button id="bWait">⏳ Wait</button>
+      <button id="bDefend">🛡 Defend</button>
+      <button id="bAuto">⚡ Auto</button>
+    </div>
+    <div id="blog"></div>
+  </div>
+</div>
+
 <div id="modalback"><div id="modal"></div></div>
 
 <div id="menu">
@@ -168,7 +203,7 @@
   <button id="btnResume" style="width:220px;display:none">↩ Resume</button>
   <div class="note">Tap a tile to plot a route, tap again to march. Drag to pan · pinch or wheel to zoom.<br>
     Keys: arrows pan · E end turn · H next hero · +/− zoom</div>
-  <div id="phase">Phase 2 build — towns · dwellings · recruiting</div>
+  <div id="phase">Phase 3 build — hex battles · sieges · abilities</div>
 </div>
 
 <script>
@@ -264,6 +299,21 @@ defCre(1,7,1,"Cataclysm Wyrm",      190,20,17,24,38,12, 1,{gold:4300,ember:3},["
 const AB_NAME={fly:"flying",ranged:"ranged",no_retal:"no retaliation",double:"strikes twice",
   charge:"cavalry charge",regen:"regenerates",drain:"drains life",poison:"venomous",
   breath:"breath attack",magic_res:"magic resistant",unlim_retal:"endless retaliation"};
+
+/* neutral creatures — the wandering packs that guard the wilds */
+const NEUTRAL_BY_NAME={};
+function defNeutral(name,hp,atk,def,dmin,dmax,spd,ab,shots){
+  const i=CREATURES.length;
+  CREATURES.push({fac:2,tier:2,up:0,name,hp,atk,def,dmin,dmax,spd,grow:0,cost:{gold:0},ab:ab||[],shots:shots||0});
+  NEUTRAL_BY_NAME[name]=i;
+  return i;
+}
+defNeutral("Bramble Wolves",10,5,4,2,4,6,[]);
+defNeutral("Barrow Wights", 16,6,6,3,5,5,["regen"]);
+defNeutral("Mire Serpents", 14,7,5,2,5,6,["poison"]);
+defNeutral("Stone Gnashers",22,7,8,3,6,4,["unlim_retal"]);
+defNeutral("Feral Harpies", 12,6,4,2,4,8,["fly"]);
+defNeutral("Gloom Bats",     8,5,3,1,3,9,["fly","drain"]);
 
 /* =============================================================================
    BUILDINGS — shared tree, faction-specific names for dwellings.
@@ -466,7 +516,8 @@ function generateWorld(seed){
   }
   for(let i=0;i<5;i++){
     const s=findSpotRetry(8+Math.floor(rnd()*16),8+Math.floor(rnd()*16),7); if(!s) continue;
-    addPair({t:"guard", cre:pick(rnd,GUARD_KINDS), n:8+Math.floor(rnd()*20), x:s.x, y:s.y});
+    const cre=pick(rnd,GUARD_KINDS);
+    addPair({t:"guard", cre, cid:NEUTRAL_BY_NAME[cre], n:8+Math.floor(rnd()*20), x:s.x, y:s.y});
   }
 
   /* --- starting heroes --- */
@@ -538,7 +589,10 @@ function initTownState(t,isMain){
   t.bld = isMain? {d1:true} : {};
   t.pool = [0,0,0,0,0,0,0];
   if(isMain) t.pool[0]=CREATURES[ROSTER[t.fac][0][0]].grow;
-  t.garr = [null,null,null,null,null,null,null];
+  /* starting garrison (symmetric for both realms) so sieges are real fights */
+  t.garr = isMain
+    ? [{c:ROSTER[t.fac][0][0],n:10},{c:ROSTER[t.fac][1][0],n:4},null,null,null,null,null]
+    : [{c:ROSTER[t.fac][0][0],n:8},null,null,null,null,null,null];
   t.builtToday = false;
   t.tav = null;
 }
@@ -701,11 +755,19 @@ const CRE_ARCH=[
 const CRE_ICON=[];
 function creatureIcon(cid){
   if(!CRE_ICON[cid]){
-    const cre=CREATURES[cid], F=FACTIONS[cre.fac];
-    const c=spriteFromMap(CRE_ARCH[cre.tier-1],
-      {x:"#15100c",X:F.color2,o:F.color,O:"#f2e3ff"},2);
-    if(cre.up){ const g=c.getContext("2d");
-      g.strokeStyle="#ffd95e"; g.lineWidth=2; g.strokeRect(1,1,c.width-2,c.height-2); }
+    const cre=CREATURES[cid];
+    let c;
+    if(cre.fac===2){                       // neutral packs use the beast silhouette
+      c=mkCanvas(24,24);
+      const g=c.getContext("2d"); g.imageSmoothingEnabled=false;
+      g.drawImage(SPR.wolf,0,3,24,16);
+    } else {
+      const F=FACTIONS[cre.fac];
+      c=spriteFromMap(CRE_ARCH[cre.tier-1],
+        {x:"#15100c",X:F.color2,o:F.color,O:"#f2e3ff"},2);
+      if(cre.up){ const g=c.getContext("2d");
+        g.strokeStyle="#ffd95e"; g.lineWidth=2; g.strokeRect(1,1,c.width-2,c.height-2); }
+    }
     CRE_ICON[cid]=c;
   }
   const copy=mkCanvas(CRE_ICON[cid].width,CRE_ICON[cid].height);
@@ -1014,7 +1076,7 @@ function objectAt(x,y){ const i=occObj[idx(x,y)]; return i<0?null:G.objects[i]; 
 function heroAt(x,y){ const id=occHero[idx(x,y)]; return id? G.heroes.find(h=>h.id===id):null; }
 function heroById(id){ return G.heroes.find(h=>h.id===id); }
 function selectedHero(){ return UI.selected? G.heroes.find(h=>h.id===UI.selected && h.owner===0):null; }
-const INTERACTIVE={pile:1,chest:1,art:1,mine:1,town:1};
+const INTERACTIVE={pile:1,chest:1,art:1,mine:1,town:1,guard:1};
 
 function makeGame(seed){
   const w=generateWorld(seed);
@@ -1046,9 +1108,9 @@ function findPath(hero,tx,ty){
   if(!inMap(tx,ty)) return null;
   if(hero.x===tx&&hero.y===ty) return null;
   const ti=idx(tx,ty);
-  /* destination legality */
+  /* destination legality: interactives, guards, and enemy heroes are valid targets */
   const dObj=objectAt(tx,ty), dHero=heroAt(tx,ty);
-  if(dHero) return null;
+  if(dHero && dHero.owner===hero.owner) return null;
   if(dObj && !INTERACTIVE[dObj.t]) return null;
   if(!dObj && !tileCost(tx,ty)) return null;
   if(dObj && !tileCost(tx,ty)) return null;   // objects always sit on passable ground anyway
@@ -1142,6 +1204,15 @@ function animTick(now){
     a.px=lerp(h.x*TILE, st.x*TILE, f);
     a.py=lerp(h.y*TILE, st.y*TILE, f);
     if(f>=1){
+      /* hostile on the next tile: stop short and give battle */
+      const hi=hostileInfoAt(h,st.x,st.y);
+      if(hi){
+        anim=null;
+        h.mp=Math.max(0,h.mp-st.cost);
+        recomputeVisible(); refreshUI();
+        launchBattleFromMap(h,hi);
+        return;
+      }
       /* arrive on tile */
       occHero[idx(h.x,h.y)]=0;
       h.x=st.x; h.y=st.y; h.mp-=st.cost; a.t=0; a.i++;
@@ -1204,6 +1275,624 @@ function interact(hero,obj){
 }
 function killObject(obj){ obj.dead=true; occObj[idx(obj.x,obj.y)]=-1;
   G.objects.forEach((o,i)=>{ if(!o.dead) occObj[idx(o.x,o.y)]=i; }); minimapDirty=true; }
+
+/* =============================================================================
+   BATTLE — hex tactical combat (Phase 3)
+   Hexes: 15x11, odd-r offset, pointy-top. Side 0 = attacker (left),
+   side 1 = defender (right). B is transient (saving is blocked mid-battle).
+   ========================================================================== */
+const BF_W=15, BF_H=11, GATE_ROW=5, WALL_COL=10;
+let B=null;
+const hexKey=(x,y)=>x+","+y;
+function hexNbs(x,y){
+  return (y&1)? [[1,0],[-1,0],[1,-1],[0,-1],[1,1],[0,1]]
+              : [[1,0],[-1,0],[0,-1],[-1,-1],[0,1],[-1,1]];
+}
+function hexDist(ax,ay,bx,by){
+  const acx=ax-((ay-(ay&1))>>1), acz=ay, acy=-acx-acz;
+  const bcx=bx-((by-(by&1))>>1), bcz=by, bcy=-bcx-bcz;
+  return Math.max(Math.abs(acx-bcx),Math.abs(acy-bcy),Math.abs(acz-bcz));
+}
+const inBF=(x,y)=>x>=0&&y>=0&&x<BF_W&&y<BF_H;
+function unitAt(x,y){ return B.units.find(u=>u.alive&&u.x===x&&u.y===y)||null; }
+function hexFree(x,y){
+  return inBF(x,y)&&!B.obst.has(hexKey(x,y))&&!B.walls.has(hexKey(x,y))&&!unitAt(x,y);
+}
+function heroFor(side){ return side===0? B.atkHero : B.defHero; }
+function hasAb(u,ab){ return CREATURES[u.cid].ab.includes(ab); }
+
+function mkUnit(side,slot,cid,n){
+  const c=CREATURES[cid];
+  return { side, slot, cid, n, n0:n, hp:c.hp, x:0, y:0, alive:true,
+    shots:c.shots, retals:0, defending:false, poison:0, moraled:false };
+}
+const SPREAD=[5,4,6,3,7,2,8,1,9,0,10];
+function startBattle(ctx){
+  /* ctx: {title, atkHero, atkStacks, defHero, defStacks, wallLv, onEnd(winSide,B)} */
+  B={ units:[], obst:new Set(), walls:new Map(), atkHero:ctx.atkHero||null, defHero:ctx.defHero||null,
+      ctx, round:0, queue:[], waitQ:[], active:null, auto:false, fast:false,
+      sel:null, reach:new Map(), targets:new Map(), floats:[], logs:[], over:false, hover:null };
+  const place=(stacks,side,col)=>{
+    let r=0;
+    stacks.forEach((s,slot)=>{
+      if(!s) return;
+      const u=mkUnit(side,slot,s.c,s.n);
+      u.x=col; u.y=SPREAD[r++%SPREAD.length];
+      while(unitAt(u.x,u.y)&&u!==unitAt(u.x,u.y)){ u.y=(u.y+1)%BF_H; }
+      B.units.push(u);
+    });
+  };
+  place(ctx.atkStacks,0,0);
+  place(ctx.defStacks,1,ctx.wallLv?13:14);
+  /* walls by fort level: 1 fort, 2 citadel, 3 castle; gate row stays open */
+  if(ctx.wallLv){
+    const rows={1:[2,3,4,6,7,8],2:[1,2,3,4,6,7,8,9],3:[0,1,2,3,4,6,7,8,9,10]}[ctx.wallLv]||[];
+    for(const r of rows) B.walls.set(hexKey(WALL_COL,r),2);
+  }
+  /* scattered obstacles in the middle field */
+  const maxOx=ctx.wallLv?8:11;
+  for(let i=0,tries=0;i<6&&tries<80;tries++){
+    const x=3+Math.floor(Math.random()*(maxOx-2)), y=Math.floor(Math.random()*BF_H);
+    if(hexFree(x,y)&&y!==GATE_ROW){ B.obst.add(hexKey(x,y)); i++; }
+  }
+  document.getElementById("battle").classList.add("show");
+  document.getElementById("btitle").textContent=ctx.title||"Battle";
+  blog(`<b>${ctx.title||"Battle"}</b> — the lines are drawn.`);
+  beginRound();
+  pump();
+}
+function blog(html){
+  B.logs.unshift(html); B.logs=B.logs.slice(0,5);
+  document.getElementById("blog").innerHTML=B.logs.join("<br>");
+}
+function bfloat(x,y,txt,color){ B.floats.push({x,y,txt,color:color||"#ffd95e",t0:performance.now()}); }
+
+/* ---- rounds & turn order ---- */
+function beginRound(){
+  B.round++;
+  for(const u of B.units) if(u.alive){ u.retals=0; u.moraled=false; u.waitedThisRound=false; }
+  B.queue=B.units.filter(u=>u.alive)
+    .sort((a,b)=>(CREATURES[b.cid].spd-CREATURES[a.cid].spd)||(a.side-b.side)||(a.slot-b.slot));
+  B.waitQ=[];
+  document.getElementById("bround").textContent="Round "+B.round;
+}
+function pickNext(){
+  while(!B.over){
+    let u=null;
+    if(B.queue.length) u=B.queue.shift();
+    else if(B.waitQ.length){ B.waitQ.sort((a,b)=>CREATURES[a.cid].spd-CREATURES[b.cid].spd); u=B.waitQ.shift(); }
+    else { beginRound(); continue; }
+    if(!u.alive) continue;
+    /* start-of-turn effects */
+    u.defending=false;
+    if(hasAb(u,"regen")&&u.hp<CREATURES[u.cid].hp){ u.hp=CREATURES[u.cid].hp; bfloat(u.x,u.y,"regen","#7fb347"); }
+    if(u.poison>0){
+      const tot=(u.n-1)*CREATURES[u.cid].hp+u.hp;
+      const dmg=Math.max(1,Math.floor(tot*0.1));
+      const k=applyDamage(u,dmg);
+      u.poison--;
+      blog(`${CREATURES[u.cid].name} suffer <b>${dmg}</b> poison${k?` — ${k} perish`:""}.`);
+      bfloat(u.x,u.y,"-"+dmg,"#9fd45f");
+      if(checkVictory()) return null;
+      if(!u.alive) continue;
+    }
+    B.active=u;
+    computeReach(u);
+    return u;
+  }
+  return null;
+}
+function controlledByHuman(u){
+  const h=heroFor(u.side);
+  return !!h && h.owner===0 && !B.auto;
+}
+/* pump: advance AI turns until a human decision (or battle end) */
+let pumpTimer=null;
+function pump(){
+  if(pumpTimer){ clearTimeout(pumpTimer); pumpTimer=null; }
+  let guard=0;
+  while(B&&!B.over&&guard++<4000){
+    if(!B.active&&!pickNext()) break;
+    const u=B.active;
+    if(controlledByHuman(u)){ syncBattleUI(); return; }
+    aiActUnit(u);
+    if(B&&!B.over&&!B.fast){ syncBattleUI(); pumpTimer=setTimeout(pump,380); return; }
+  }
+  if(B&&!B.over) syncBattleUI();
+}
+function finishAction(u,waited){
+  if(B.over) return;
+  if(!waited&&!u.moraled&&u.alive&&heroFor(u.side)&&Math.random()<0.10){
+    u.moraled=true; computeReach(u);
+    blog(`${CREATURES[u.cid].name} surge with <b>morale</b> — they act again!`);
+    bfloat(u.x,u.y,"MORALE!","#7fb3ff");
+    return;                       // same unit goes again
+  }
+  B.active=null;
+  checkVictory();
+}
+
+/* ---- reachability ---- */
+function computeReach(u){
+  const spd=CREATURES[u.cid].spd, fly=hasAb(u,"fly");
+  const reach=new Map(); reach.set(hexKey(u.x,u.y),0);
+  if(fly){
+    for(let y=0;y<BF_H;y++) for(let x=0;x<BF_W;x++){
+      const d=hexDist(u.x,u.y,x,y);
+      if(d>0&&d<=spd&&hexFree(x,y)) reach.set(hexKey(x,y),d);
+    }
+  } else {
+    const q=[[u.x,u.y,0]];
+    while(q.length){
+      const [cx,cy,d]=q.shift();
+      if(d>=spd) continue;
+      for(const [dx,dy] of hexNbs(cx,cy)){
+        const nx=cx+dx, ny=cy+dy, k=hexKey(nx,ny);
+        if(!hexFree(nx,ny)||reach.has(k)) continue;
+        reach.set(k,d+1); q.push([nx,ny,d+1]);
+      }
+    }
+  }
+  B.reach=reach;
+  /* melee targets: enemy (or wall) adjacent to any reachable hex; remember best from-hex */
+  const targets=new Map();
+  for(const [k,d] of reach){
+    const [hx,hy]=k.split(",").map(Number);
+    for(const [dx,dy] of hexNbs(hx,hy)){
+      const nx=hx+dx, ny=hy+dy;
+      const t=inBF(nx,ny)? unitAt(nx,ny):null;
+      const wall=B.walls.has(hexKey(nx,ny));
+      if((t&&t.side!==u.side)||wall){
+        const tk=hexKey(nx,ny);
+        const cur=targets.get(tk);
+        if(!cur||d<cur.d) targets.set(tk,{fx:hx,fy:hy,d,wall:!wall?false:true});
+      }
+    }
+  }
+  B.targets=targets;
+}
+function adjacentEnemy(u){
+  return hexNbs(u.x,u.y).some(([dx,dy])=>{
+    const t=inBF(u.x+dx,u.y+dy)?unitAt(u.x+dx,u.y+dy):null;
+    return t&&t.side!==u.side;
+  });
+}
+
+/* ---- damage ---- */
+function calcDamage(att,def,opts){
+  opts=opts||{};
+  const a=CREATURES[att.cid], d=CREATURES[def.cid];
+  const hA=opts.heroA!==undefined?opts.heroA:heroFor(att.side);
+  const hD=opts.heroD!==undefined?opts.heroD:heroFor(def.side);
+  const atkStat=a.atk+(hA?hA.atk:0);
+  let defStat=d.def+(hD?hD.def:0);
+  if(def.defending) defStat=Math.round(defStat*1.3);
+  const roll=opts.roll!==undefined? opts.roll : a.dmin+Math.random()*(a.dmax-a.dmin);
+  let dmg=roll*att.n;
+  const diff=atkStat-defStat;
+  dmg*= diff>=0? 1+0.05*Math.min(diff,60) : 1-0.025*Math.min(-diff,28);
+  if(opts.melee&&hasAb(att,"ranged")) dmg*=0.5;                 // shooters are poor in melee
+  if(opts.ranged&&hexDist(att.x,att.y,def.x,def.y)>10) dmg*=0.5; // long range
+  if(opts.ranged&&B&&B.walls.size>0&&att.side===0&&def.x>WALL_COL) dmg*=0.5; // wall cover
+  if(opts.melee&&hasAb(att,"charge")) dmg*=1+Math.min(0.5,0.05*(opts.moved||0));
+  if(opts.luck) dmg*=2;
+  return Math.max(1,Math.round(dmg));
+}
+function applyDamage(u,dmg){
+  const maxHp=CREATURES[u.cid].hp;
+  let tot=(u.n-1)*maxHp+u.hp-dmg;
+  const before=u.n;
+  if(tot<=0){ u.n=0; u.hp=0; u.alive=false; }
+  else { u.n=Math.ceil(tot/maxHp); u.hp=tot-(u.n-1)*maxHp; }
+  return before-u.n;
+}
+function healUnit(u,amount){
+  const maxHp=CREATURES[u.cid].hp;
+  let tot=Math.min(u.n0*maxHp,(u.n-1)*maxHp+u.hp+amount);
+  u.n=Math.ceil(tot/maxHp); u.hp=tot-(u.n-1)*maxHp;
+}
+function strike(att,def,opts){
+  opts=opts||{};
+  const luck=heroFor(att.side)&&Math.random()<0.10;
+  const dmg=calcDamage(att,def,Object.assign({},opts,{luck}));
+  const killed=applyDamage(def,dmg);
+  if(luck) bfloat(att.x,att.y,"LUCK!","#ffd95e");
+  bfloat(def.x,def.y,"-"+dmg,"#ff8a6b");
+  blog(`${CREATURES[att.cid].name} ${opts.retal?"retaliate for":opts.ranged?"shoot for":"strike for"} <b>${dmg}</b>${killed?` — <b>${killed}</b> ${CREATURES[def.cid].name} fall`:""}.`);
+  if(hasAb(att,"drain")&&dmg>0){ healUnit(att,dmg); bfloat(att.x,att.y,"drain","#b06bd4"); }
+  if(hasAb(att,"poison")&&def.alive){ def.poison=3; bfloat(def.x,def.y,"poison","#9fd45f"); }
+  /* breath: the hex directly behind the target also burns */
+  if(opts.melee&&hasAb(att,"breath")){
+    const nbs=hexNbs(att.x,att.y);
+    const i=nbs.findIndex(([dx,dy])=>att.x+dx===def.x&&att.y+dy===def.y);
+    if(i>=0){
+      const [bdx,bdy]=hexNbs(def.x,def.y)[i];
+      const behind=inBF(def.x+bdx,def.y+bdy)? unitAt(def.x+bdx,def.y+bdy):null;
+      if(behind&&behind!==att){
+        const k2=applyDamage(behind,dmg);
+        bfloat(behind.x,behind.y,"-"+dmg,"#ffb35e");
+        blog(`…the breath scorches ${CREATURES[behind.cid].name}${k2?` — ${k2} fall`:""}.`);
+      }
+    }
+  }
+  return dmg;
+}
+function canRetaliate(def,att){
+  return def.alive&&!hasAb(att,"no_retal")&&(hasAb(def,"unlim_retal")||def.retals<1);
+}
+
+/* ---- unit actions (used by both UI and battle AI) ---- */
+function actMove(u,x,y){
+  const steps=B.reach.get(hexKey(x,y));
+  if(steps===undefined) return false;
+  u.x=x; u.y=y; u.movedSteps=steps;
+  return true;
+}
+function actMelee(u,target){
+  const t=B.targets.get(hexKey(target.x,target.y));
+  if(!t||t.wall) return false;
+  if(!actMove(u,t.fx,t.fy)&&!(t.fx===u.x&&t.fy===u.y)) return false;
+  const moved=t.d;
+  strike(u,target,{melee:true,moved});
+  if(target.alive&&canRetaliate(target,u)){ target.retals++; strike(target,u,{melee:true,retal:true}); }
+  if(u.alive&&target.alive&&hasAb(u,"double")) strike(u,target,{melee:true,moved:0});
+  finishAction(u,false);
+  return true;
+}
+function actWallHit(u,wx,wy){
+  const t=B.targets.get(hexKey(wx,wy));
+  if(!t||!t.wall) return false;
+  actMove(u,t.fx,t.fy);
+  const hp=B.walls.get(hexKey(wx,wy))-1;
+  if(hp<=0){ B.walls.delete(hexKey(wx,wy)); blog(`A wall section <b>crumbles</b>!`); }
+  else { B.walls.set(hexKey(wx,wy),hp); blog(`${CREATURES[u.cid].name} batter the wall.`); }
+  bfloat(wx,wy,"CRACK","#c9ccc9");
+  finishAction(u,false);
+  return true;
+}
+function actShoot(u,target){
+  if(!hasAb(u,"ranged")||u.shots<=0||adjacentEnemy(u)) return false;
+  u.shots--;
+  strike(u,target,{ranged:true});
+  finishAction(u,false);
+  return true;
+}
+function actMoveOnly(u,x,y){
+  if(!actMove(u,x,y)) return false;
+  finishAction(u,false);
+  return true;
+}
+function actWait(u){
+  if(u.waitedThisRound) return false;
+  u.waitedThisRound=true;
+  B.waitQ.push(u); B.active=null;
+  blog(`${CREATURES[u.cid].name} bide their time.`);
+  return true;
+}
+function actDefend(u){
+  u.defending=true;
+  blog(`${CREATURES[u.cid].name} raise their guard.`);
+  finishAction(u,false);
+  return true;
+}
+
+/* ---- battle AI (drives defenders, neutrals, and the Auto button) ---- */
+function expDmg(att,def,melee){
+  const a=CREATURES[att.cid];
+  return calcDamage(att,def,{roll:(a.dmin+a.dmax)/2,melee,ranged:!melee,moved:0,luck:false});
+}
+function aiActUnit(u){
+  const foes=B.units.filter(v=>v.alive&&v.side!==u.side);
+  if(!foes.length){ finishAction(u,false); return; }
+  if(hasAb(u,"ranged")&&u.shots>0&&!adjacentEnemy(u)){
+    let best=null,bs=-1;
+    for(const f of foes){
+      const s=expDmg(u,f,false)*(1+CREATURES[f.cid].atk*f.n/100);
+      if(s>bs){ bs=s; best=f; }
+    }
+    actShoot(u,best); return;
+  }
+  /* melee: best value target among attackable */
+  let best=null,bs=-1e18;
+  for(const f of foes){
+    const t=B.targets.get(hexKey(f.x,f.y));
+    if(!t||t.wall) continue;
+    const s=expDmg(u,f,true)-(canRetaliate(f,u)? 0.5*expDmg(f,u,true):0);
+    if(s>bs){ bs=s; best=f; }
+  }
+  if(best){ actMelee(u,best); return; }
+  /* nothing attackable: attackers break an adjacent wall, else advance */
+  if(u.side===0)
+    for(const [k,t] of B.targets) if(t.wall){ const [wx,wy]=k.split(",").map(Number); actWallHit(u,wx,wy); return; }
+  let mv=null,bd=1e9;
+  const near=foes.reduce((m,f)=>{ const d=hexDist(u.x,u.y,f.x,f.y); return d<m.d?{f,d}:m; },{f:foes[0],d:1e9}).f;
+  for(const [k] of B.reach){
+    const [hx,hy]=k.split(",").map(Number);
+    const d=hexDist(hx,hy,near.x,near.y);
+    if(d<bd){ bd=d; mv={x:hx,y:hy}; }
+  }
+  if(mv&&!(mv.x===u.x&&mv.y===u.y)) actMoveOnly(u,mv.x,mv.y);
+  else actDefend(u);
+}
+function checkVictory(){
+  if(!B||B.over) return true;
+  const a=B.units.some(u=>u.alive&&u.side===0);
+  const d=B.units.some(u=>u.alive&&u.side===1);
+  if(a&&d) return false;
+  endBattle(a?0:1);
+  return true;
+}
+function endBattle(winSide){
+  B.over=true;
+  if(pumpTimer){ clearTimeout(pumpTimer); pumpTimer=null; }
+  /* write attacker survivors back to the hero's army by slot */
+  const surv=side=>B.units.filter(u=>u.side===side);
+  if(B.atkHero){
+    for(const u of surv(0)) B.atkHero.army[u.slot]= u.n>0? {c:u.cid,n:u.n}:null;
+  }
+  /* casualties + XP */
+  const lost=side=>surv(side).map(u=>({name:CREATURES[u.cid].name,k:u.n0-u.n})).filter(e=>e.k>0);
+  let xp=0;
+  if(winSide===0&&B.atkHero){
+    xp=surv(1).reduce((s,u)=>s+(u.n0-u.n)*CREATURES[u.cid].hp,0);
+    B.atkHero.xp+=xp;
+  }
+  const result={winSide,xp,lostA:lost(0),lostD:lost(1),
+    defSurvivors:surv(1).map(u=>({slot:u.slot,c:u.cid,n:u.n}))};
+  B.ctx.onEnd(winSide,result);
+  const rows=(list,label)=>`<tr><td>${label}</td><td>${list.length?list.map(e=>`${e.k} ${e.name}`).join(", "):"none"}</td></tr>`;
+  showModal(`<h2>${winSide===0?"⚔ VICTORY":"☠ DEFEAT"}</h2>
+    <table>${rows(result.lostA,"Your losses")}${rows(result.lostD,"Enemy losses")}
+    ${xp?`<tr><td>Experience</td><td>+${xp} XP</td></tr>`:""}</table>
+    <div class="mrow"><button id="bDone" class="primary">Continue</button></div>`,true);
+  document.getElementById("bDone").onclick=()=>{
+    closeModal();
+    document.getElementById("battle").classList.remove("show");
+    B=null;
+    recomputeVisible(); refreshUI();
+  };
+}
+
+/* ---- battle rendering + input ---- */
+const bcanvas=document.getElementById("bcanvas"), bctx=bcanvas.getContext("2d");
+let bGeom=null;
+function bLayout(){
+  const wrap=document.getElementById("bwrap");
+  const availW=wrap.clientWidth-8, availH=wrap.clientHeight-8;
+  const R=Math.max(10,Math.min(availW/(Math.sqrt(3)*(BF_W+0.6)), availH/(1.5*BF_H+0.6)));
+  const hexW=Math.sqrt(3)*R;
+  const gw=hexW*(BF_W+0.5), gh=R*(1.5*BF_H+0.5);
+  const d=window.devicePixelRatio||1;
+  const cssW=Math.round(gw+8), cssH=Math.round(gh+8);
+  if(bcanvas.style.width!==cssW+"px"){ bcanvas.style.width=cssW+"px"; bcanvas.style.height=cssH+"px"; }
+  if(bcanvas.width!==Math.round(cssW*d)){ bcanvas.width=Math.round(cssW*d); bcanvas.height=Math.round(cssH*d); }
+  bGeom={R,hexW,ox:4,oy:4,dpr:d};
+}
+function hexCenter(x,y){
+  return { x:bGeom.ox+bGeom.hexW*(x+0.5*(y&1))+bGeom.hexW/2,
+           y:bGeom.oy+bGeom.R*1.5*y+bGeom.R };
+}
+function pxToHex(px,py){
+  let best=null,bd=1e9;
+  for(let y=0;y<BF_H;y++) for(let x=0;x<BF_W;x++){
+    const c=hexCenter(x,y), d=(c.x-px)**2+(c.y-py)**2;
+    if(d<bd){ bd=d; best={x,y}; }
+  }
+  return bd<=bGeom.R*bGeom.R*1.4? best:null;
+}
+function hexPath(g,cx,cy,r){
+  g.beginPath();
+  for(let i=0;i<6;i++){
+    const a=Math.PI/180*(60*i-30);
+    const px=cx+r*Math.cos(a), py=cy+r*Math.sin(a);
+    i? g.lineTo(px,py):g.moveTo(px,py);
+  }
+  g.closePath();
+}
+function drawBattle(time){
+  if(!B) return;
+  bLayout();
+  const g=bctx, d=bGeom.dpr;
+  g.setTransform(d,0,0,d,0,0);
+  g.imageSmoothingEnabled=false;
+  g.clearRect(0,0,bcanvas.width,bcanvas.height);
+  const act=B.active, humanTurn=act&&controlledByHuman(act);
+  for(let y=0;y<BF_H;y++) for(let x=0;x<BF_W;x++){
+    const c=hexCenter(x,y), k=hexKey(x,y);
+    hexPath(g,c.x,c.y,bGeom.R-0.8);
+    g.fillStyle=(x+y)%2? "#2c3520":"#313b24";
+    if(humanTurn&&B.reach.has(k)&&!unitAt(x,y)) g.fillStyle=(x+y)%2? "#3b4a2c":"#42522f";
+    g.fill();
+    g.strokeStyle="#1c2213"; g.lineWidth=1; g.stroke();
+    if(B.obst.has(k)){
+      g.fillStyle="#57534e";
+      g.beginPath(); g.ellipse(c.x,c.y+2,bGeom.R*0.55,bGeom.R*0.4,0,0,7); g.fill();
+      g.fillStyle="#7d786f"; g.fillRect(c.x-3,c.y-6,6,5);
+    }
+    if(B.walls.has(k)){
+      const hp=B.walls.get(k);
+      g.fillStyle=hp>1? "#6f6a72":"#54505a";
+      g.fillRect(c.x-bGeom.hexW*0.42,c.y-bGeom.R*0.8,bGeom.hexW*0.84,bGeom.R*1.6);
+      g.strokeStyle="#332b36"; g.strokeRect(c.x-bGeom.hexW*0.42,c.y-bGeom.R*0.8,bGeom.hexW*0.84,bGeom.R*1.6);
+      if(hp===1){ g.strokeStyle="#1c130b"; g.beginPath(); g.moveTo(c.x-6,c.y-8); g.lineTo(c.x+2,c.y); g.lineTo(c.x-3,c.y+8); g.stroke(); }
+    }
+  }
+  /* hover target ring */
+  if(B.hover&&humanTurn){
+    const t=unitAt(B.hover.x,B.hover.y), k=hexKey(B.hover.x,B.hover.y);
+    const c=hexCenter(B.hover.x,B.hover.y);
+    if((t&&t.side!==act.side&&(B.targets.has(k)||canShootNow(act)))||(B.targets.get(k)&&B.targets.get(k).wall)){
+      hexPath(g,c.x,c.y,bGeom.R-1.5); g.strokeStyle="#ff5a3c"; g.lineWidth=2; g.stroke();
+    } else if(B.reach.has(k)&&!t){
+      hexPath(g,c.x,c.y,bGeom.R-1.5); g.strokeStyle="#ffd95e"; g.lineWidth=1.5; g.stroke();
+    }
+  }
+  /* units */
+  for(const u of B.units){
+    if(!u.alive) continue;
+    const c=hexCenter(u.x,u.y);
+    if(u===act){ hexPath(g,c.x,c.y,bGeom.R-1.5); g.strokeStyle="#ffd95e"; g.lineWidth=2.5; g.stroke(); }
+    const icon=creatureIcon(u.cid);
+    const s=Math.min(bGeom.R*1.5,54);
+    g.save();
+    if(u.side===1){ g.translate(c.x+s/2,0); g.scale(-1,1); g.drawImage(icon,0,c.y-s*0.75,s,s); }
+    else g.drawImage(icon,c.x-s/2,c.y-s*0.75,s,s);
+    g.restore();
+    /* count badge + side stripe */
+    const bw=Math.max(18,(""+u.n).length*7+8);
+    g.fillStyle=u.side===0? "#2f5d8a":"#8a2f2b";
+    g.fillRect(c.x-bw/2,c.y+bGeom.R*0.28,bw,12);
+    g.strokeStyle="#0d0b08"; g.strokeRect(c.x-bw/2,c.y+bGeom.R*0.28,bw,12);
+    g.fillStyle="#fff"; g.font="bold 10px monospace"; g.textAlign="center";
+    g.fillText(u.n,c.x,c.y+bGeom.R*0.28+9.5);
+    g.textAlign="left";
+    if(u.defending){ g.fillStyle="#c9ccc9"; g.font="9px monospace"; g.fillText("🛡",c.x+bw/2+1,c.y+bGeom.R*0.28+9); }
+    if(u.poison>0){ g.fillStyle="#9fd45f"; g.fillRect(c.x-bw/2-4,c.y+bGeom.R*0.28,3,12); }
+  }
+  /* floating texts */
+  const now=performance.now();
+  B.floats=B.floats.filter(f=>now-f.t0<900);
+  for(const f of B.floats){
+    const c=hexCenter(f.x,f.y), t=(now-f.t0)/900;
+    g.globalAlpha=1-t;
+    g.fillStyle=f.color; g.font="bold 12px monospace"; g.textAlign="center";
+    g.fillText(f.txt,c.x,c.y-bGeom.R*0.7-t*16);
+    g.globalAlpha=1; g.textAlign="left";
+  }
+}
+function canShootNow(u){ return hasAb(u,"ranged")&&u.shots>0&&!adjacentEnemy(u); }
+function syncBattleUI(){
+  if(!B) return;
+  /* turn bar: active + rest of queue + waiters */
+  const bar=document.getElementById("bturnbar");
+  bar.innerHTML="";
+  const seq=[B.active,...B.queue,...B.waitQ].filter(u=>u&&u.alive).slice(0,14);
+  seq.forEach((u,i)=>{
+    const div=document.createElement("div");
+    div.className="tb "+(i===0?"cur ":"")+(u.side===0?"ally":"foe");
+    div.title=`${CREATURES[u.cid].name} ×${u.n} (spd ${CREATURES[u.cid].spd})`;
+    div.appendChild(creatureIcon(u.cid));
+    bar.appendChild(div);
+  });
+  const mine=B.active&&controlledByHuman(B.active);
+  document.getElementById("bWait").disabled=!mine||B.active.waitedThisRound;
+  document.getElementById("bDefend").disabled=!mine;
+}
+bcanvas.addEventListener("pointermove",e=>{
+  if(!B||!bGeom) return;
+  const r=bcanvas.getBoundingClientRect();
+  B.hover=pxToHex(e.clientX-r.left,e.clientY-r.top);
+});
+bcanvas.addEventListener("pointerup",e=>{
+  if(!B||B.over||!B.active||!controlledByHuman(B.active)) return;
+  const r=bcanvas.getBoundingClientRect();
+  const h=pxToHex(e.clientX-r.left,e.clientY-r.top);
+  if(!h) return;
+  const u=B.active, k=hexKey(h.x,h.y), t=unitAt(h.x,h.y);
+  let acted=false;
+  if(t&&t.side!==u.side){
+    if(canShootNow(u)&&!B.targets.has(k)) acted=actShoot(u,t);
+    else if(B.targets.has(k)&&!B.targets.get(k).wall) acted=actMelee(u,t);
+    else { toast("Out of reach."); return; }
+  }
+  else if(B.walls.has(k)&&B.targets.get(k)&&B.targets.get(k).wall) acted=actWallHit(u,h.x,h.y);
+  else if(!t&&B.reach.has(k)&&(h.x!==u.x||h.y!==u.y)) acted=actMoveOnly(u,h.x,h.y);
+  if(acted) pump();
+});
+document.getElementById("bWait").onclick=()=>{
+  if(B&&B.active&&controlledByHuman(B.active)&&actWait(B.active)) pump();
+};
+document.getElementById("bDefend").onclick=()=>{
+  if(B&&B.active&&controlledByHuman(B.active)&&actDefend(B.active)) pump();
+};
+document.getElementById("bAuto").onclick=()=>{
+  if(!B) return;
+  B.auto=!B.auto;
+  document.getElementById("bAuto").classList.toggle("on",B.auto);
+  pump();
+};
+
+/* ---- launching battles from the adventure map ---- */
+function splitGuardStacks(obj){
+  const k=obj.n>=12?3:obj.n>=5?2:1;
+  const base=Math.floor(obj.n/k);
+  const stacks=[];
+  for(let i=0;i<k;i++) stacks.push({c:obj.cid!==undefined?obj.cid:NEUTRAL_BY_NAME[obj.cre]||0,
+    n:base+(i<obj.n%k?1:0)});
+  return stacks;
+}
+function townDefended(t){ return t.garr.some(Boolean); }
+function hostileInfoAt(hero,x,y){
+  const eh=heroAt(x,y);
+  if(eh&&eh.owner!==hero.owner) return {type:"hero",foe:eh};
+  const o=objectAt(x,y);
+  if(o&&o.t==="guard") return {type:"guard",obj:o};
+  if(o&&o.t==="town"&&o.owner!==hero.owner&&townDefended(o)) return {type:"siege",obj:o};
+  return null;
+}
+function heroArmyStacks(h){ return h.army.map(s=>s?{c:s.c,n:s.n}:null); }
+function launchBattleFromMap(hero,hi){
+  if(!hero.army.some(Boolean)){ toast(`${hero.name} has no troops to fight with!`,"bad"); return; }
+  UI.preview=null; UI.pending=null;
+  if(hi.type==="guard"){
+    const obj=hi.obj;
+    startBattle({ title:`${hero.name} vs ${obj.cre}`,
+      atkHero:hero, atkStacks:heroArmyStacks(hero),
+      defHero:null, defStacks:splitGuardStacks(obj), wallLv:0,
+      onEnd:(win,res)=>{
+        const left=res.defSurvivors.reduce((s,u)=>s+u.n,0);
+        if(win===0){ killObject(obj); toast(`The ${obj.cre} are slain. +${res.xp} XP`,"good"); }
+        else { obj.n=Math.max(1,left); killHero(hero); }
+      }});
+  } else if(hi.type==="hero"){
+    const foe=hi.foe;
+    startBattle({ title:`${hero.name} vs ${foe.name}`,
+      atkHero:hero, atkStacks:heroArmyStacks(hero),
+      defHero:foe, defStacks:heroArmyStacks(foe), wallLv:0,
+      onEnd:(win,res)=>{
+        if(win===0){ killHero(foe); toast(`${foe.name} is defeated! +${res.xp} XP`,"good"); }
+        else {
+          for(const u of res.defSurvivors) foe.army[u.slot]= u.n>0? {c:u.c,n:u.n}:null;
+          killHero(hero);
+        }
+      }});
+  } else if(hi.type==="siege"){
+    const t=hi.obj;
+    const wallLv=t.bld.castle?3:t.bld.citadel?2:t.bld.fort?1:0;
+    startBattle({ title:`Siege of ${t.name}`,
+      atkHero:hero, atkStacks:heroArmyStacks(hero),
+      defHero:null, defStacks:t.garr.map(s=>s?{c:s.c,n:s.n}:null), wallLv,
+      onEnd:(win,res)=>{
+        if(win===0){
+          t.garr=[null,null,null,null,null,null,null];
+          t.owner=hero.owner; minimapDirty=true;
+          toast(`⚑ ${t.name} has fallen to your banner! +${res.xp} XP`,"good");
+          if(G.objects.filter(o=>o.t==="town"&&!o.dead).every(o=>o.owner===0))
+            toast("Every town in Embervale is yours. (Victory scoring arrives in Phase 5.)","good");
+        } else {
+          const ng=[null,null,null,null,null,null,null];
+          for(const u of res.defSurvivors) if(u.n>0) ng[u.slot]={c:u.c,n:u.n};
+          t.garr=ng;
+          killHero(hero);
+        }
+      }});
+  }
+}
+function killHero(h){
+  occHero[idx(h.x,h.y)]=0;
+  const i=G.heroes.indexOf(h);
+  if(i>=0) G.heroes.splice(i,1);
+  if(h.owner===0){
+    toast(`${h.name} has fallen in battle.`,"bad");
+    if(UI.selected===h.id){
+      const next=G.heroes.find(x=>x.owner===0);
+      UI.selected=next?next.id:null;
+    }
+    if(!G.heroes.some(x=>x.owner===0)&&!playerTowns(0).length)
+      toast("You have no heroes and no towns… (defeat rules arrive in Phase 5)","bad");
+  }
+  recomputeVisible();
+}
 
 /* =============================================================================
    TURNS + ECONOMY
@@ -1349,7 +2038,7 @@ function dateParts(){
   return { month:Math.floor(t/28)+1, week:Math.floor((t%28)/7)+1, day:t%7+1 };
 }
 function endTurn(){
-  if(!G||G.cur!==0||anim) return;
+  if(!G||G.cur!==0||anim||B) return;
   if(modalBack.classList.contains("show")) return;   // never end the turn under a dialog
   UI.preview=null; UI.pending=null;
   G.cur=1; refreshUI();
@@ -1630,7 +2319,7 @@ function slotClick(t,arr,i){
   renderTownPanel(t);
 }
 function showHelp(){
-  showModal(`<h2>How to play — Phase 2</h2>
+  showModal(`<h2>How to play — Phase 3</h2>
     <table>
     <tr><td>Move</td><td>tap/click a tile → route preview, tap again → march</td></tr>
     <tr><td>Pan / zoom</td><td>drag · pinch, wheel, or +/−</td></tr>
@@ -1641,7 +2330,9 @@ function showHelp(){
     <tr><td>Armies</td><td>tap a stack then a slot to move troops between garrison and hero</td></tr>
     <tr><td>Tavern</td><td>hire extra heroes (2500g, max 4)</td></tr>
     <tr><td>Market</td><td>trade resources; more markets, better rates</td></tr>
-    <tr><td>Guards</td><td>neutral packs block their tile — battles arrive in Phase 3</td></tr>
+    <tr><td>Battle</td><td>tap a guard, enemy hero, or garrisoned town twice to attack</td></tr>
+    <tr><td>In combat</td><td>tap a green hex to move, an enemy to strike/shoot · Wait (W) · Defend (D) · Auto resolves for you</td></tr>
+    <tr><td>Sieges</td><td>walls block the ground — batter them, fly over, or push the gate row</td></tr>
     <tr><td>End turn</td><td>⌛ button or E — restores movement, pays income</td></tr>
     </table>
     <div class="mrow"><button onclick="closeModal()">Close</button></div>`);
@@ -1695,6 +2386,11 @@ function loadFrom(json){
     if(o.t==="mine"&&!MINE_DEFS[o.sub]) bad("Corrupt mine data.");
     if(o.t==="pile"&&!RES_NAME[o.sub]) bad("Corrupt pile data.");
     if(o.t==="art"&&!(Number.isInteger(o.art)&&o.art>=0&&o.art<ARTIFACTS.length)) bad("Corrupt artifact data.");
+    if(o.t==="guard"){
+      if(!(Number.isInteger(o.n)&&o.n>0)) bad("Corrupt guard data.");
+      if(!(Number.isInteger(o.cid)&&CREATURES[o.cid]&&CREATURES[o.cid].fac===2))
+        o.cid=NEUTRAL_BY_NAME[o.cre]!==undefined? NEUTRAL_BY_NAME[o.cre] : NEUTRAL_BY_NAME["Bramble Wolves"];
+    }
     if(o.t==="town"){
       o.fac=o.fac===1?1:0;
       if(d.v===1) initTownState(o,o.slot===0);               // migrate Phase 1 towns
@@ -1733,6 +2429,7 @@ function loadFrom(json){
   }
 }
 function showSave(){
+  if(B){ toast("Finish the battle first."); return; }
   if(anim) skipAnim();
   showModal(`<h2>Export save</h2>
     <p class="sub">Copy this string somewhere safe. Paste it into Load to resume.</p>
@@ -1746,6 +2443,7 @@ function showSave(){
   };
 }
 function showLoad(){
+  if(B){ toast("Finish the battle first."); return; }
   showModal(`<h2>Import save</h2>
     <p class="sub">Paste a save string exported earlier.</p>
     <textarea id="loadTa" placeholder='{"v":1,...}'></textarea>
@@ -1840,21 +2538,26 @@ function handleTap(sx,sy){
   if(!G.explored[0][i]){ toast("Unexplored lands — send a hero to scout."); return; }
 
   const tapHero=heroAt(t.x,t.y);
-  if(tapHero){
-    if(tapHero.owner===0){
-      if(UI.selected===tapHero.id) openHeroPanel(tapHero);
-      else { UI.selected=tapHero.id; UI.preview=null; UI.pending=null; refreshUI(); }
-    } else toast("An enemy hero. Battles arrive in Phase 3.","bad");
+  if(tapHero&&tapHero.owner===0){
+    if(UI.selected===tapHero.id) openHeroPanel(tapHero);
+    else { UI.selected=tapHero.id; UI.preview=null; UI.pending=null; refreshUI(); }
     return;
   }
   const obj=objectAt(t.x,t.y);
-  if(obj&&obj.t==="guard"){
-    toast(`${obj.n} ${obj.cre} bar the way. Battles arrive in Phase 3.`,"bad");
-    UI.preview=null; UI.pending=null; return;
-  }
   const h=selectedHero();
-  if(!h){ toast("Select one of your heroes first."); return; }
+  if(!h){
+    if(tapHero) toast("An enemy hero — select one of your heroes to attack.");
+    else if(obj&&obj.t==="guard") toast(`${obj.n} ${obj.cre} bar the way.`);
+    else toast("Select one of your heroes first.");
+    return;
+  }
   if(t.x===h.x&&t.y===h.y){ openHeroPanel(h); return; }
+  /* hostile-target hint on first tap */
+  if(!(UI.pending&&UI.pending.x===t.x&&UI.pending.y===t.y)){
+    if(obj&&obj.t==="guard") toast(`${obj.n} ${obj.cre} — tap again to attack.`);
+    else if(tapHero) toast(`${tapHero.name} of the ${FACTIONS[tapHero.fac].short} — tap again to attack.`);
+    else if(obj&&obj.t==="town"&&obj.owner!==0&&townDefended(obj)) toast(`${obj.name} is garrisoned — tap again to lay siege.`);
+  }
 
   if(UI.pending&&UI.pending.x===t.x&&UI.pending.y===t.y){
     const pv=computePreview(h,t.x,t.y);   // recompute: hover may have replaced the preview
@@ -1885,6 +2588,11 @@ function zoomCenter(f){
 }
 window.addEventListener("keydown",e=>{
   if(!G) return;
+  if(B){                                     // battle hotkeys only
+    if(e.key==="w"||e.key==="W") document.getElementById("bWait").click();
+    if(e.key==="d"||e.key==="D") document.getElementById("bDefend").click();
+    return;
+  }
   const t=e.target;
   if(t&&(t.tagName==="INPUT"||t.tagName==="TEXTAREA")) return;      // typing, not commanding
   if(!document.getElementById("menu").classList.contains("hide")) return;
@@ -1955,7 +2663,7 @@ buildSprites();
 initTopbar();
 requestAnimationFrame(function loop(t){
   if(anim) animTick(performance.now());
-  draw(t);
+  if(B) drawBattle(t); else draw(t);
   requestAnimationFrame(loop);
 });
 
@@ -1975,6 +2683,24 @@ window.EV={
   canBuild, doBuild, recruitInto, hireHero, tradeRes, townCreature, maxRecruit,
   playerTowns, visitingHero, openTownPanel, closeModal,
   CREATURES, ROSTER, BLD,
+  /* battle hooks */
+  get B(){ return B; },
+  calcDamage, applyDamage, hostileInfoAt, townDefended, startBattle, rebuildOcc,
+  bRecompute:()=>B&&B.active&&computeReach(B.active),
+  bHexPx:(x,y)=>bGeom?hexCenter(x,y):null,
+  bAct:{ move:(x,y)=>B&&actMoveOnly(B.active,x,y), melee:t=>B&&actMelee(B.active,t),
+    shoot:t=>B&&actShoot(B.active,t), wait:()=>B&&actWait(B.active),
+    defend:()=>B&&actDefend(B.active), wall:(x,y)=>B&&actWallHit(B.active,x,y),
+    pump, unitAt:(x,y)=>B?unitAt(x,y):null },
+  autoBattle(){
+    if(!B) return Promise.resolve(null);
+    return new Promise(res=>{
+      const orig=B.ctx.onEnd;
+      B.ctx.onEnd=(w,r)=>{ orig(w,r); res({win:w,result:r}); };
+      B.auto=true; B.fast=true;
+      pump();
+    });
+  },
 };
 </script>
 </body>
