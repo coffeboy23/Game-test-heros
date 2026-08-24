@@ -101,7 +101,9 @@
   #battle.show{display:flex}
   #bhead{display:flex;justify-content:space-between;color:var(--gold2);font-weight:bold;letter-spacing:1px;padding:0 4px}
   #bhead #bround{color:var(--ink2);font-weight:normal}
-  #bturnbar{display:flex;gap:3px;align-items:center;min-height:34px;overflow-x:hidden;padding:0 4px}
+  #bturnbar{display:flex;gap:3px;align-items:center;min-height:34px;overflow-x:auto;
+    scrollbar-width:none;padding:0 4px}
+  #bturnbar::-webkit-scrollbar{display:none}
   #bturnbar .tb{width:32px;height:32px;background:#0d0b08;border:1px solid var(--edge);display:flex;
     align-items:center;justify-content:center;position:relative;flex:0 0 auto}
   #bturnbar .tb.cur{border-color:var(--gold2);box-shadow:0 0 6px #c9a22788}
@@ -1108,8 +1110,12 @@ function findPath(hero,tx,ty){
   if(!inMap(tx,ty)) return null;
   if(hero.x===tx&&hero.y===ty) return null;
   const ti=idx(tx,ty);
-  /* destination legality: interactives, guards, and enemy heroes are valid targets */
-  const dObj=objectAt(tx,ty), dHero=heroAt(tx,ty);
+  /* destination legality: interactives, guards, and enemy heroes are valid targets.
+     An enemy hero the player cannot currently SEE is treated as absent so the
+     path preview doesn't leak their position (bumping into them still fights). */
+  const dObj=objectAt(tx,ty);
+  let dHero=heroAt(tx,ty);
+  if(dHero && dHero.owner!==hero.owner && !G.visible[hero.owner][ti]) dHero=null;
   if(dHero && dHero.owner===hero.owner) return null;
   if(dObj && !INTERACTIVE[dObj.t]) return null;
   if(!dObj && !tileCost(tx,ty)) return null;
@@ -1337,13 +1343,14 @@ function startBattle(ctx){
   }
   toastsEl.innerHTML="";                      // stale map toasts would cover the action bar
   document.getElementById("battle").classList.add("show");
+  document.getElementById("bAuto").classList.remove("on");
   document.getElementById("btitle").textContent=ctx.title||"Battle";
   blog(`<b>${ctx.title||"Battle"}</b> — the lines are drawn.`);
   beginRound();
   pump();
 }
 function blog(html){
-  B.logs.unshift(html); B.logs=B.logs.slice(0,5);
+  B.logs.unshift(html); B.logs=B.logs.slice(0,4);
   document.getElementById("blog").innerHTML=B.logs.join("<br>");
 }
 function bfloat(x,y,txt,color){ B.floats.push({x,y,txt,color:color||"#ffd95e",t0:performance.now()}); }
@@ -1364,18 +1371,21 @@ function pickNext(){
     else if(B.waitQ.length){ B.waitQ.sort((a,b)=>CREATURES[a.cid].spd-CREATURES[b.cid].spd); u=B.waitQ.shift(); }
     else { beginRound(); continue; }
     if(!u.alive) continue;
-    /* start-of-turn effects */
+    /* start-of-turn effects — only on the FIRST activation of the round:
+       a wait-deferred action is the same turn, so no second regen/poison tick */
     u.defending=false;
-    if(hasAb(u,"regen")&&u.hp<CREATURES[u.cid].hp){ u.hp=CREATURES[u.cid].hp; bfloat(u.x,u.y,"regen","#7fb347"); }
-    if(u.poison>0){
-      const tot=(u.n-1)*CREATURES[u.cid].hp+u.hp;
-      const dmg=Math.max(1,Math.floor(tot*0.1));
-      const k=applyDamage(u,dmg);
-      u.poison--;
-      blog(`${CREATURES[u.cid].name} suffer <b>${dmg}</b> poison${k?` — ${k} perish`:""}.`);
-      bfloat(u.x,u.y,"-"+dmg,"#9fd45f");
-      if(checkVictory()) return null;
-      if(!u.alive) continue;
+    if(!u.waitedThisRound){
+      if(hasAb(u,"regen")&&u.hp<CREATURES[u.cid].hp){ u.hp=CREATURES[u.cid].hp; bfloat(u.x,u.y,"regen","#7fb347"); }
+      if(u.poison>0){
+        const tot=(u.n-1)*CREATURES[u.cid].hp+u.hp;
+        const dmg=Math.max(1,Math.floor(tot*0.1));
+        const k=applyDamage(u,dmg);
+        u.poison--;
+        blog(`${CREATURES[u.cid].name} suffer <b>${dmg}</b> poison${k?` — ${k} perish`:""}.`);
+        bfloat(u.x,u.y,"-"+dmg,"#9fd45f");
+        if(checkVictory()) return null;
+        if(!u.alive) continue;
+      }
     }
     B.active=u;
     computeReach(u);
@@ -1403,6 +1413,7 @@ function pump(){
 }
 function finishAction(u,waited){
   if(B.over) return;
+  if(checkVictory()) return;      // battle decided: no phantom morale turn on an empty field
   if(!waited&&!u.moraled&&u.alive&&heroFor(u.side)&&Math.random()<0.10){
     u.moraled=true; computeReach(u);
     blog(`${CREATURES[u.cid].name} surge with <b>morale</b> — they act again!`);
@@ -1410,7 +1421,6 @@ function finishAction(u,waited){
     return;                       // same unit goes again
   }
   B.active=null;
-  checkVictory();
 }
 
 /* ---- reachability ---- */
@@ -1767,10 +1777,12 @@ function syncBattleUI(){
   /* turn bar: active + rest of queue + waiters */
   const bar=document.getElementById("bturnbar");
   bar.innerHTML="";
-  const seq=[B.active,...B.queue,...B.waitQ].filter(u=>u&&u.alive).slice(0,14);
+  const seq=[B.active,...B.queue,
+    ...[...B.waitQ].sort((a,b)=>CREATURES[a.cid].spd-CREATURES[b.cid].spd)]
+    .filter(u=>u&&u.alive).slice(0,14);
   seq.forEach((u,i)=>{
     const div=document.createElement("div");
-    div.className="tb "+(i===0?"cur ":"")+(u.side===0?"ally":"foe");
+    div.className="tb "+((i===0&&u===B.active)?"cur ":"")+(u.side===0?"ally":"foe");
     div.title=`${CREATURES[u.cid].name} ×${u.n} (spd ${CREATURES[u.cid].spd})`;
     div.appendChild(creatureIcon(u.cid));
     bar.appendChild(div);
@@ -1792,7 +1804,7 @@ bcanvas.addEventListener("pointerup",e=>{
   const u=B.active, k=hexKey(h.x,h.y), t=unitAt(h.x,h.y);
   let acted=false;
   if(t&&t.side!==u.side){
-    if(canShootNow(u)&&!B.targets.has(k)) acted=actShoot(u,t);
+    if(canShootNow(u)) acted=actShoot(u,t);              // shooters shoot; melee only when blocked/adjacent/dry
     else if(B.targets.has(k)&&!B.targets.get(k).wall) acted=actMelee(u,t);
     else { toast("Out of reach."); return; }
   }
@@ -2079,6 +2091,10 @@ function newDay(){
    ========================================================================== */
 const toastsEl=document.getElementById("toasts");
 function toast(msg,cls){
+  if(B&&!B.over){    // mid-battle messages go to the battle log, not over the action bar
+    blog(msg.replace(/&/g,"&amp;").replace(/</g,"&lt;"));
+    return;
+  }
   const d=document.createElement("div");
   d.className="toast"+(cls?" "+cls:""); d.textContent=msg;
   toastsEl.appendChild(d);
@@ -2139,7 +2155,7 @@ function refreshUI(){
     c.onclick=()=>{ if(UI.selected===h.id){ openHeroPanel(h); } else { UI.selected=h.id; centerOn(h.x,h.y); refreshUI(); } };
     hl.appendChild(c);
   }
-  if(!G.heroes.some(h=>h.owner===0)) hl.innerHTML=`<div class="sub">No heroes. Taverns open in Phase 2.</div>`;
+  if(!G.heroes.some(h=>h.owner===0)) hl.innerHTML=`<div class="sub">No heroes — hire one at a town tavern.</div>`;
   /* town list */
   const tl=document.getElementById("townList"); tl.innerHTML="";
   for(const t of G.objects.filter(o=>o.t==="town"&&!o.dead&&o.owner===0)){
@@ -2320,6 +2336,7 @@ function slotClick(t,arr,i){
   renderTownPanel(t);
 }
 function showHelp(){
+  if(B){ toast("Finish the battle first."); return; }
   showModal(`<h2>How to play — Phase 3</h2>
     <table>
     <tr><td>Move</td><td>tap/click a tile → route preview, tap again → march</td></tr>
@@ -2391,6 +2408,7 @@ function loadFrom(json){
       if(!(Number.isInteger(o.n)&&o.n>0)) bad("Corrupt guard data.");
       if(!(Number.isInteger(o.cid)&&CREATURES[o.cid]&&CREATURES[o.cid].fac===2))
         o.cid=NEUTRAL_BY_NAME[o.cre]!==undefined? NEUTRAL_BY_NAME[o.cre] : NEUTRAL_BY_NAME["Bramble Wolves"];
+      o.cre=CREATURES[o.cid].name;          // display name always matches the stat block
     }
     if(o.t==="town"){
       o.fac=o.fac===1?1:0;
@@ -2553,10 +2571,10 @@ function handleTap(sx,sy){
     return;
   }
   if(t.x===h.x&&t.y===h.y){ openHeroPanel(h); return; }
-  /* hostile-target hint on first tap */
+  /* hostile-target hint on first tap (never name what the fog still hides) */
   if(!(UI.pending&&UI.pending.x===t.x&&UI.pending.y===t.y)){
     if(obj&&obj.t==="guard") toast(`${obj.n} ${obj.cre} — tap again to attack.`);
-    else if(tapHero) toast(`${tapHero.name} of the ${FACTIONS[tapHero.fac].short} — tap again to attack.`);
+    else if(tapHero&&G.visible[0][i]) toast(`${tapHero.name} of the ${FACTIONS[tapHero.fac].short} — tap again to attack.`);
     else if(obj&&obj.t==="town"&&obj.owner!==0&&townDefended(obj)) toast(`${obj.name} is garrisoned — tap again to lay siege.`);
   }
 
@@ -2627,6 +2645,11 @@ function cycleHero(){
 function startGame(seed){
   anim=null;
   if(aiTimer){ clearTimeout(aiTimer); aiTimer=null; }
+  if(B){                              // tear down any battle from the previous game
+    if(pumpTimer){ clearTimeout(pumpTimer); pumpTimer=null; }
+    B=null;
+    document.getElementById("battle").classList.remove("show");
+  }
   G=makeGame(seed);
   renderTerrain(); rebuildOcc(); recomputeVisible();
   const h=G.heroes.find(h=>h.owner===0);
@@ -2648,6 +2671,7 @@ document.getElementById("btnNew").onclick=()=>{
 };
 document.getElementById("btnResume").onclick=()=>{ document.getElementById("menu").classList.add("hide"); };
 document.getElementById("btnMenu").onclick=()=>{
+  if(B){ toast("Finish the battle first."); return; }
   const m=document.getElementById("menu");
   m.classList.remove("hide");
   document.getElementById("btnResume").style.display=G?"block":"none";
@@ -2699,6 +2723,7 @@ window.EV={
       const orig=B.ctx.onEnd;
       B.ctx.onEnd=(w,r)=>{ orig(w,r); res({win:w,result:r}); };
       B.auto=true; B.fast=true;
+      document.getElementById("bAuto").classList.add("on");
       pump();
     });
   },
