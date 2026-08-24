@@ -1335,6 +1335,7 @@ function startBattle(ctx){
     const x=3+Math.floor(Math.random()*(maxOx-2)), y=Math.floor(Math.random()*BF_H);
     if(hexFree(x,y)&&y!==GATE_ROW){ B.obst.add(hexKey(x,y)); i++; }
   }
+  toastsEl.innerHTML="";                      // stale map toasts would cover the action bar
   document.getElementById("battle").classList.add("show");
   document.getElementById("btitle").textContent=ctx.title||"Battle";
   blog(`<b>${ctx.title||"Battle"}</b> — the lines are drawn.`);
