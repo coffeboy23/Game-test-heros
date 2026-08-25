@@ -665,7 +665,7 @@ function initTownState(t,isMain){
 function isPassableT(terr,x,y){ if(!inMap(x,y)) return false; const t=terr[idx(x,y)]; return t!==TER.MOUNTAIN&&t!==TER.WATER; }
 function mkHero(owner,fac,x,y,id,name){
   return { id, owner, fac, name:name||FACTIONS[fac].heroNames[0], x, y,
-    mp:BASE_MP, maxMp:BASE_MP, level:1, xp:0,
+    mp:BASE_MP, maxMp:BASE_MP, mpSpent:0, level:1, xp:0,
     atk:2, def:2, pow:1, know:1, mana:10, maxMana:10,
     army:[null,null,null,null,null,null,null], artifacts:[],
     skills:{}, spells:START_SPELLS(fac).slice(),
@@ -1280,6 +1280,7 @@ function animTick(now){
       const hi=hostileInfoAt(h,st.x,st.y);
       if(hi){
         anim=null;
+        h.mpSpent=(h.mpSpent||0)+st.cost;
         h.mp=Math.max(0,h.mp-st.cost);
         recomputeVisible(); refreshUI();
         launchBattleFromMap(h,hi);
@@ -1287,7 +1288,7 @@ function animTick(now){
       }
       /* arrive on tile */
       occHero[idx(h.x,h.y)]=0;
-      h.x=st.x; h.y=st.y; h.mp-=st.cost; a.t=0; a.i++;
+      h.x=st.x; h.y=st.y; h.mp-=st.cost; h.mpSpent=(h.mpSpent||0)+st.cost; a.t=0; a.i++;
       revealCircle(h.owner,h.x,h.y,SIGHT_HERO);
       const obj=objectAt(h.x,h.y);
       occHero[idx(h.x,h.y)]=h.id;
@@ -1370,12 +1371,13 @@ function checkLevelUp(h){
     const stat=w[Math.floor(Math.random()*w.length)];
     h[stat]++;
     refreshDerived(h);
-    const opts=skillOptions(h);
     if(h.owner===0){
-      lvlQueue.push({heroId:h.id,level:h.level,stat,opts});
+      /* options are computed when the dialog SHOWS, so queued picks never go stale */
+      lvlQueue.push({heroId:h.id,level:h.level,stat});
       if(!modalBack.classList.contains("show")) presentNextLevelUp();
-    } else if(opts.length){
-      applySkill(h,opts[Math.floor(Math.random()*opts.length)]);
+    } else {
+      const opts=skillOptions(h);
+      if(opts.length) applySkill(h,opts[Math.floor(Math.random()*opts.length)]);
     }
   }
 }
@@ -1390,14 +1392,20 @@ function skillOptions(h){
   for(let i=cands.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [cands[i],cands[j]]=[cands[j],cands[i]]; }
   return cands.slice(0,2);
 }
-function applySkill(h,id){ h.skills[id]=skillRank(h,id)+1; refreshDerived(h); }
+function applySkill(h,id){
+  const r=skillRank(h,id);
+  if(r>=3) return false;
+  if(r===0&&Object.keys(h.skills||{}).length>=MAX_SKILLS) return false;
+  h.skills[id]=r+1; refreshDerived(h);
+  return true;
+}
 function refreshDerived(h){
   h.maxMana=calcMaxMana(h);
   h.mana=Math.min(h.mana,h.maxMana);
-  const newMax=calcMaxMp(h);
-  if(newMax>h.maxMp) h.mp+=newMax-h.maxMp;   // gains apply at once; the day's spent MP stays spent
-  h.maxMp=newMax;
-  h.mp=Math.min(h.mp,h.maxMp);
+  /* movement is "max minus what was spent today" — so equip toggles are net zero
+     while genuine max gains (level-up, new boots) still pay out immediately */
+  h.maxMp=calcMaxMp(h);
+  h.mp=clamp(h.maxMp-(h.mpSpent||0),0,h.maxMp);
 }
 const STAT_LABEL={atk:"Attack",def:"Defense",pow:"Power",know:"Knowledge"};
 function presentNextLevelUp(){
@@ -1405,12 +1413,13 @@ function presentNextLevelUp(){
   if(!l) return;
   const h=heroById(l.heroId);
   if(!h){ presentNextLevelUp(); return; }
-  const btns=l.opts.map(id=>{
+  const opts=skillOptions(h);                 // fresh: honors current ranks and the 5-skill cap
+  const btns=opts.map(id=>{
     const r=skillRank(h,id)+1;
     return `<button data-skill="${id}">${RANK_NAME[r]} ${SKILL_BY_ID[id].name}<br><small class="sub">${SKILL_BY_ID[id].fx(r)}</small></button>`;
   }).join("");
   showModal(`<h2>✦ ${h.name} — Level ${l.level}!</h2>
-    <p>+1 <b style="color:var(--gold2)">${STAT_LABEL[l.stat]}</b>${l.opts.length?" — and choose a skill:":""}</p>
+    <p>+1 <b style="color:var(--gold2)">${STAT_LABEL[l.stat]}</b>${opts.length?" — and choose a skill:":""}</p>
     <div class="mrow">${btns||`<button id="lvlOk">Continue</button>`}</div>`,true);
   modalEl.querySelectorAll("[data-skill]").forEach(b=>{
     b.onclick=()=>{ applySkill(h,b.dataset.skill); toast(`${h.name} learns ${RANK_NAME[skillRank(h,b.dataset.skill)]} ${SKILL_BY_ID[b.dataset.skill].name}.`,"good"); closeModal(); refreshUI(); };
@@ -1563,6 +1572,7 @@ function pickNext(){
         if(!u.alive) continue;
       }
     }
+    if(B.targeting){ B.targeting=null; toast("Spell cancelled."); }   // never leaks across turns
     B.active=u;
     computeReach(u);
     return u;
@@ -1715,12 +1725,13 @@ function canRetaliate(def,att){
 
 /* ---- spellcasting (hero, once per round) ---- */
 function canCastNow(side){
+  if(!B) return false;
   const h=heroFor(side);
   return !!h&&!B.cast[side]&&Array.isArray(h.spells)&&h.spells.length>0;
 }
 function spellPower(h){ return effStat(h,"pow")*(1+0.10*skillRank(h,"arc")); }
 function castSpell(side,sid,target){
-  if(B.over||!canCastNow(side)) return {ok:false,why:"Cannot cast now."};
+  if(!B||B.over||!canCastNow(side)) return {ok:false,why:"Cannot cast now."};
   const h=heroFor(side), sp=SPELLS[sid];
   if(!sp||!h.spells.includes(sid)) return {ok:false,why:"Spell unknown."};
   if(h.mana<sp.cost) return {ok:false,why:"Not enough mana."};
@@ -1903,6 +1914,7 @@ function checkVictory(){
 }
 function endBattle(winSide){
   B.over=true;
+  B.active=null; B.targeting=null;
   if(pumpTimer){ clearTimeout(pumpTimer); pumpTimer=null; }
   /* write attacker survivors back to the hero's army by slot */
   const surv=side=>B.units.filter(u=>u.side===side);
@@ -2005,7 +2017,7 @@ function drawBattle(time){
       const legal= sp.target==="enemy"? u.side!==B.targeting.side : u.side===B.targeting.side;
       if(!legal) continue;
       const c=hexCenter(u.x,u.y);
-      hexPath(g,c.x,c.y,bGeom.R-1.5);
+      hexPath(g,c.x,c.y,u===B.active?bGeom.R-5:bGeom.R-1.5);   // nest inside the active ring
       g.strokeStyle="#b06bd4"; g.lineWidth=2+Math.sin(time/180); g.stroke();
     }
   }
@@ -2112,7 +2124,7 @@ bcanvas.addEventListener("pointerup",e=>{
   if(acted) pump();
 });
 document.getElementById("bCast").onclick=()=>{
-  if(!B||!B.active||!controlledByHuman(B.active)) return;
+  if(!B||B.over||!B.active||!controlledByHuman(B.active)) return;
   const side=B.active.side, h=heroFor(side);
   if(!canCastNow(side)){ toast(B.cast[side]?"Already cast this round.":"No spells."); return; }
   if(B.targeting){ B.targeting=null; toast("Spell cancelled."); return; }
@@ -2402,6 +2414,7 @@ function newDay(){
     }
   }
   for(const h of G.heroes){
+    h.mpSpent=0;
     h.maxMp=calcMaxMp(h); h.mp=h.maxMp;
     h.maxMana=calcMaxMana(h);
     h.mana=Math.min(h.maxMana,h.mana+1+2*skillRank(h,"myst"));
@@ -2431,6 +2444,8 @@ function toast(msg,cls){
 const modalBack=document.getElementById("modalback"), modalEl=document.getElementById("modal");
 let modalLocked=false;
 function showModal(html,locked,cls){
+  toastsEl.innerHTML="";        // stale map toasts must not linger over dialogs;
+                                // fresh feedback fired while one is open still shows above
   modalEl.innerHTML=html; modalLocked=!!locked;
   modalEl.classList.toggle("wide",cls==="wide");
   modalBack.classList.add("show");
@@ -2826,10 +2841,15 @@ function loadFrom(json){
       }
     }
     h.equip=eq;
+    for(const k of ["atk","def","pow","know"]){
+      const dflt={atk:2,def:2,pow:1,know:1}[k];
+      h[k]=Number.isFinite(h[k])&&h[k]>=0? Math.floor(h[k]) : dflt;
+    }
     h.maxMana=calcMaxMana(h);
     h.mana=Number.isFinite(h.mana)? clamp(h.mana,0,h.maxMana):h.maxMana;
     h.maxMp=calcMaxMp(h);
     h.mp=clamp(h.mp,0,h.maxMp);
+    h.mpSpent=Number.isFinite(h.mpSpent)&&h.mpSpent>=0? h.mpSpent : Math.max(0,h.maxMp-h.mp);
     if(d.v===2&&!Array.isArray(h.army)) bad("Corrupt army data.");
     h.army=normArmy(h.army);
     if(!h.army.every(validStack)) bad("Corrupt army data.");
@@ -2873,6 +2893,7 @@ function loadFrom(json){
       visible:[new Uint8Array(MAPW*MAPH),new Uint8Array(MAPW*MAPH)],
     };
     UI.selected=null; UI.preview=null; UI.pending=null; anim=null;
+    lvlQueue.length=0;
     if(aiTimer){ clearTimeout(aiTimer); aiTimer=null; }
     renderTerrain(); rebuildOcc(); recomputeVisible();
     const h=G.heroes.find(h=>h.owner===0);
@@ -3045,10 +3066,12 @@ function zoomCenter(f){
 }
 window.addEventListener("keydown",e=>{
   if(!G) return;
-  if(B){                                     // battle hotkeys only
-    if(e.key==="w"||e.key==="W") document.getElementById("bWait").click();
-    if(e.key==="d"||e.key==="D") document.getElementById("bDefend").click();
-    if(e.key==="c"||e.key==="C") document.getElementById("bCast").click();
+  if(B){                                     // battle hotkeys only, never under a dialog
+    if(!modalBack.classList.contains("show")){
+      if(e.key==="w"||e.key==="W") document.getElementById("bWait").click();
+      if(e.key==="d"||e.key==="D") document.getElementById("bDefend").click();
+      if(e.key==="c"||e.key==="C") document.getElementById("bCast").click();
+    }
     if(e.key==="Escape"){
       if(B.targeting){ B.targeting=null; toast("Spell cancelled."); }
       else if(modalBack.classList.contains("show")&&!modalLocked) closeModal();
@@ -3087,6 +3110,7 @@ function cycleHero(){
    ========================================================================== */
 function startGame(seed){
   anim=null;
+  lvlQueue.length=0;                  // no stale level-ups from the previous game
   if(aiTimer){ clearTimeout(aiTimer); aiTimer=null; }
   if(B){                              // tear down any battle from the previous game
     if(pumpTimer){ clearTimeout(pumpTimer); pumpTimer=null; }
