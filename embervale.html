@@ -185,6 +185,7 @@
   <div id="bwrap"><canvas id="bcanvas"></canvas></div>
   <div id="bfoot">
     <div id="bbtns">
+      <button id="bCast">✨ Cast</button>
       <button id="bWait">⏳ Wait</button>
       <button id="bDefend">🛡 Defend</button>
       <button id="bAuto">⚡ Auto</button>
@@ -205,7 +206,7 @@
   <button id="btnResume" style="width:220px;display:none">↩ Resume</button>
   <div class="note">Tap a tile to plot a route, tap again to march. Drag to pan · pinch or wheel to zoom.<br>
     Keys: arrows pan · E end turn · H next hero · +/− zoom</div>
-  <div id="phase">Phase 3 build — hex battles · sieges · abilities</div>
+  <div id="phase">Phase 4 build — heroes · spells · artifacts</div>
 </div>
 
 <script>
@@ -242,15 +243,77 @@ const MINE_DEFS = {
   ember: { name:"Emberglass Kiln",res:"ember", amt:1 },
 };
 
-/* Artifacts: collected in Phase 1, stat effects wired up in Phase 4. */
+/* Artifacts: 5 equip slots (weapon/armor/helm/2x misc); effects live. */
 const ARTIFACTS = [
-  { name:"Blade of the Ember Court", slot:"weapon", desc:"+2 Attack" },
-  { name:"Aegis of Pale Roots",      slot:"armor",  desc:"+2 Defense" },
-  { name:"Circlet of the Deep Moon", slot:"helm",   desc:"+2 Knowledge" },
-  { name:"Wandering Star Talisman",  slot:"misc",   desc:"+1 Power" },
-  { name:"Boots of the Grey Road",   slot:"misc",   desc:"+300 movement" },
-  { name:"Sigil of Quiet Thunder",   slot:"misc",   desc:"+1 Attack, +1 Defense" },
+  { name:"Blade of the Ember Court", slot:"weapon", desc:"+2 Attack",   eff:{atk:2} },
+  { name:"Aegis of Pale Roots",      slot:"armor",  desc:"+2 Defense",  eff:{def:2} },
+  { name:"Circlet of the Deep Moon", slot:"helm",   desc:"+2 Knowledge",eff:{know:2} },
+  { name:"Wandering Star Talisman",  slot:"misc",   desc:"+1 Power",    eff:{pow:1} },
+  { name:"Boots of the Grey Road",   slot:"misc",   desc:"+300 movement",eff:{mp:300} },
+  { name:"Sigil of Quiet Thunder",   slot:"misc",   desc:"+1 Attack, +1 Defense", eff:{atk:1,def:1} },
+  { name:"Lantern of Hollow Fire",   slot:"misc",   desc:"+2 Power",    eff:{pow:2} },
+  { name:"Chalice of First Light",   slot:"helm",   desc:"+1 to all stats", eff:{atk:1,def:1,pow:1,know:1} },
 ];
+const EQUIP_SLOTS=["weapon","armor","helm","misc1","misc2"];
+function slotFor(artId){ const s=ARTIFACTS[artId].slot; return s==="misc"?["misc1","misc2"]:[s]; }
+
+/* =============================================================================
+   HERO SKILLS + SPELLS + EXPERIENCE (Phase 4)
+   ========================================================================== */
+const SKILLS=[
+  { id:"path", name:"Pathfinding",  fx:r=>`+${10*r}% map movement` },
+  { id:"marks",name:"Marksmanship", fx:r=>`+${10*r}% ranged damage` },
+  { id:"fury", name:"Battle Fury",  fx:r=>`+${10*r}% melee damage` },
+  { id:"wall", name:"Stonewall",    fx:r=>`−${5*r}% damage taken` },
+  { id:"cmd",  name:"Command",      fx:r=>`+${5*r}% morale chance` },
+  { id:"fort", name:"Fortune",      fx:r=>`+${5*r}% luck chance` },
+  { id:"arc",  name:"Arcane Focus", fx:r=>`+${10*r}% spell power` },
+  { id:"myst", name:"Mysticism",    fx:r=>`+${2*r} mana each dawn` },
+];
+const SKILL_BY_ID={}; SKILLS.forEach(s=>SKILL_BY_ID[s.id]=s);
+const RANK_NAME=["","Basic","Advanced","Expert"];
+const MAX_SKILLS=5;
+function skillRank(h,id){ return (h&&h.skills&&h.skills[id])||0; }
+
+const SPELLS=[
+  { name:"Emberbolt",        cost:5, kind:"dmg",   target:"enemy", desc:"Scorch one enemy stack",            dmg:p=>20+10*p },
+  { name:"Chain of Cinders", cost:9, kind:"dmg2",  target:"enemy", desc:"Burn a foe and the nearest other",  dmg:p=>15+7*p },
+  { name:"Mendinglight",     cost:6, kind:"heal",  target:"ally",  desc:"Mend and rally a friendly stack",   heal:p=>30+15*p },
+  { name:"Bloodsong",        cost:4, kind:"buff",  target:"ally",  desc:"+4 Attack for 3 rounds",  eff:[{k:"atk",amt:4}],  rounds:3 },
+  { name:"Stoneskin",        cost:4, kind:"buff",  target:"ally",  desc:"+4 Defense for 3 rounds", eff:[{k:"def",amt:4}],  rounds:3 },
+  { name:"Hastewind",        cost:5, kind:"buff",  target:"ally",  desc:"+3 Speed for 3 rounds",   eff:[{k:"spd",amt:3}],  rounds:3 },
+  { name:"Duskveil",         cost:5, kind:"debuff",target:"enemy", desc:"−4 Attack for 3 rounds",  eff:[{k:"atk",amt:-4}], rounds:3 },
+  { name:"Frostbind",        cost:6, kind:"debuff",target:"enemy", desc:"−3 Speed, −3 Defense for 2 rounds", eff:[{k:"spd",amt:-3},{k:"def",amt:-3}], rounds:2 },
+  { name:"Summon Emberlings",cost:10,kind:"summon",target:"none",  desc:"Call ember sprites to the field" },
+];
+const START_SPELLS=fac=>fac===0?[0,4]:[0,3];
+
+function xpNeeded(level){ return 500*level*(level+1); }   // xp to REACH level+1
+function effStat(h,s){
+  if(!h) return 0;
+  let v=(s==="mp")?0:(h[s]||0);   // "mp" is artifact-bonus-only; never read current movement
+  if(h.equip&&h.artifacts) for(const sl of EQUIP_SLOTS){
+    const pos=h.equip[sl];
+    if(pos>=0&&h.artifacts[pos]!==undefined){
+      const e=ARTIFACTS[h.artifacts[pos]].eff;
+      if(e&&e[s]) v+=e[s];
+    }
+  }
+  return v;
+}
+function calcMaxMana(h){ return effStat(h,"know")*10; }
+function calcMaxMp(h){
+  return Math.round((BASE_MP+effStat(h,"mp"))*(1+0.10*skillRank(h,"path")));
+}
+/* the 4 spells a town's mage guild teaches (stable per town per world) */
+function guildSpells(t){
+  const out=[];
+  for(let i=0;out.length<4&&i<40;i++){
+    const s=Math.floor(hash2(t.id*13+i,i*7+1,G.seed)*SPELLS.length);
+    if(!out.includes(s)) out.push(s);
+  }
+  return out;
+}
 const GUARD_KINDS = ["Bramble Wolves","Barrow Wights","Mire Serpents","Stone Gnashers","Feral Harpies","Gloom Bats"];
 
 /* =============================================================================
@@ -316,6 +379,7 @@ defNeutral("Mire Serpents", 14,7,5,2,5,6,["poison"]);
 defNeutral("Stone Gnashers",22,7,8,3,6,4,["unlim_retal"]);
 defNeutral("Feral Harpies", 12,6,4,2,4,8,["fly"]);
 defNeutral("Gloom Bats",     8,5,3,1,3,9,["fly","drain"]);
+const SUMMON_CID=defNeutral("Ember Sprites",8,6,3,2,3,7,["fly"]);
 
 /* =============================================================================
    BUILDINGS — shared tree, faction-specific names for dwellings.
@@ -603,7 +667,9 @@ function mkHero(owner,fac,x,y,id,name){
   return { id, owner, fac, name:name||FACTIONS[fac].heroNames[0], x, y,
     mp:BASE_MP, maxMp:BASE_MP, level:1, xp:0,
     atk:2, def:2, pow:1, know:1, mana:10, maxMana:10,
-    army:[null,null,null,null,null,null,null], artifacts:[] };
+    army:[null,null,null,null,null,null,null], artifacts:[],
+    skills:{}, spells:START_SPELLS(fac).slice(),
+    equip:{weapon:-1,armor:-1,helm:-1,misc1:-1,misc2:-1} };
 }
 /* ===== [END MAPGEN] ======================================================= */
 
@@ -1252,12 +1318,13 @@ function interact(hero,obj){
           <button id="chXp">✦ ${tier[1]} XP</button>
         </div>`, true);
       document.getElementById("chGold").onclick=()=>{ gainRes(0,"gold",tier[0]); toast(`+${tier[0]} gold.`,"good"); closeModal(); refreshUI(); };
-      document.getElementById("chXp").onclick=()=>{ hero.xp+=tier[1]; toast(`${hero.name} gains ${tier[1]} XP.`,"good"); closeModal(); refreshUI(); };
+      document.getElementById("chXp").onclick=()=>{ toast(`${hero.name} gains ${tier[1]} XP.`,"good"); gainXp(hero,tier[1]); closeModal(); refreshUI(); };
     } else gainRes(1,"gold",tier[0]);
     killObject(obj);
   } else if(obj.t==="art"){
     hero.artifacts.push(obj.art);
-    if(hero.owner===0) toast(`${hero.name} takes the ${ARTIFACTS[obj.art].name}!`,"good");
+    const worn=autoEquip(hero,hero.artifacts.length-1);
+    if(hero.owner===0) toast(`${hero.name} takes the ${ARTIFACTS[obj.art].name}${worn?" and dons it":""}!`,"good");
     killObject(obj);
   } else if(mine){
     if(obj.owner===hero.owner){ if(hero.owner===0) toast(`This ${MINE_DEFS[obj.sub].name} is already yours.`); }
@@ -1275,12 +1342,114 @@ function interact(hero,obj){
         if(G.objects.filter(o=>o.t==="town").every(o=>o.owner===0))
           toast("Every town in Embervale is yours. (Victory scoring arrives in Phase 5.)","good");
       } else toast(`⚑ ${obj.name} was seized by the Duskmire Covenant!`,"bad");
-    } else if(hero.owner===0) openTownPanel(obj);
+    } else {
+      learnAtGuild(hero,obj);
+      if(hero.owner===0) openTownPanel(obj);
+    }
   }
   recomputeVisible(); refreshUI();
 }
 function killObject(obj){ obj.dead=true; occObj[idx(obj.x,obj.y)]=-1;
   G.objects.forEach((o,i)=>{ if(!o.dead) occObj[idx(o.x,o.y)]=i; }); minimapDirty=true; }
+
+/* =============================================================================
+   HERO PROGRESSION — XP, level-ups, artifacts, spell learning (Phase 4)
+   ========================================================================== */
+const lvlQueue=[];
+function gainXp(h,amt){
+  if(!h||amt<=0) return;
+  h.xp+=amt;
+  checkLevelUp(h);
+}
+function checkLevelUp(h){
+  let guard=0;
+  while(h.xp>=xpNeeded(h.level)&&guard++<50){
+    h.level++;
+    const w=h.fac===0? ["atk","atk","atk","def","def","def","pow","pow","know","know"]
+                     : ["atk","atk","def","def","pow","pow","pow","know","know","know"];
+    const stat=w[Math.floor(Math.random()*w.length)];
+    h[stat]++;
+    refreshDerived(h);
+    const opts=skillOptions(h);
+    if(h.owner===0){
+      lvlQueue.push({heroId:h.id,level:h.level,stat,opts});
+      if(!modalBack.classList.contains("show")) presentNextLevelUp();
+    } else if(opts.length){
+      applySkill(h,opts[Math.floor(Math.random()*opts.length)]);
+    }
+  }
+}
+function skillOptions(h){
+  const owned=Object.keys(h.skills||{});
+  const cands=SKILLS.filter(s=>{
+    const r=skillRank(h,s.id);
+    if(r>=3) return false;
+    if(r===0&&owned.length>=MAX_SKILLS) return false;
+    return true;
+  }).map(s=>s.id);
+  for(let i=cands.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [cands[i],cands[j]]=[cands[j],cands[i]]; }
+  return cands.slice(0,2);
+}
+function applySkill(h,id){ h.skills[id]=skillRank(h,id)+1; refreshDerived(h); }
+function refreshDerived(h){
+  h.maxMana=calcMaxMana(h);
+  h.mana=Math.min(h.mana,h.maxMana);
+  const newMax=calcMaxMp(h);
+  if(newMax>h.maxMp) h.mp+=newMax-h.maxMp;   // gains apply at once; the day's spent MP stays spent
+  h.maxMp=newMax;
+  h.mp=Math.min(h.mp,h.maxMp);
+}
+const STAT_LABEL={atk:"Attack",def:"Defense",pow:"Power",know:"Knowledge"};
+function presentNextLevelUp(){
+  const l=lvlQueue.shift();
+  if(!l) return;
+  const h=heroById(l.heroId);
+  if(!h){ presentNextLevelUp(); return; }
+  const btns=l.opts.map(id=>{
+    const r=skillRank(h,id)+1;
+    return `<button data-skill="${id}">${RANK_NAME[r]} ${SKILL_BY_ID[id].name}<br><small class="sub">${SKILL_BY_ID[id].fx(r)}</small></button>`;
+  }).join("");
+  showModal(`<h2>✦ ${h.name} — Level ${l.level}!</h2>
+    <p>+1 <b style="color:var(--gold2)">${STAT_LABEL[l.stat]}</b>${l.opts.length?" — and choose a skill:":""}</p>
+    <div class="mrow">${btns||`<button id="lvlOk">Continue</button>`}</div>`,true);
+  modalEl.querySelectorAll("[data-skill]").forEach(b=>{
+    b.onclick=()=>{ applySkill(h,b.dataset.skill); toast(`${h.name} learns ${RANK_NAME[skillRank(h,b.dataset.skill)]} ${SKILL_BY_ID[b.dataset.skill].name}.`,"good"); closeModal(); refreshUI(); };
+  });
+  const okB=document.getElementById("lvlOk");
+  if(okB) okB.onclick=closeModal;
+}
+/* ---- artifacts: equip/unequip ---- */
+function autoEquip(h,pos){
+  const aid=h.artifacts[pos];
+  for(const sl of slotFor(aid)) if(h.equip[sl]<0){ h.equip[sl]=pos; refreshDerived(h); return sl; }
+  return null;
+}
+function equipArtifact(h,pos){
+  const aid=h.artifacts[pos];
+  if(aid===undefined) return false;
+  for(const sl of EQUIP_SLOTS) if(h.equip[sl]===pos) return false;   // already worn
+  const slots=slotFor(aid);
+  let target=slots.find(sl=>h.equip[sl]<0);
+  if(target===undefined) target=slots[0];                            // swap out the first
+  h.equip[target]=pos;
+  refreshDerived(h);
+  return true;
+}
+function unequipArtifact(h,slot){
+  if(h.equip[slot]<0) return false;
+  h.equip[slot]=-1;
+  refreshDerived(h);
+  return true;
+}
+/* ---- mage guild teaching ---- */
+function learnAtGuild(h,t){
+  if(!t.bld.guild||t.owner!==h.owner) return;
+  const learned=[];
+  for(const s of guildSpells(t))
+    if(!h.spells.includes(s)){ h.spells.push(s); learned.push(SPELLS[s].name); }
+  if(learned.length&&h.owner===0)
+    toast(`${h.name} studies at the guild: ${learned.join(", ")}.`,"good");
+}
 
 /* =============================================================================
    BATTLE — hex tactical combat (Phase 3)
@@ -1310,14 +1479,17 @@ function hasAb(u,ab){ return CREATURES[u.cid].ab.includes(ab); }
 function mkUnit(side,slot,cid,n){
   const c=CREATURES[cid];
   return { side, slot, cid, n, n0:n, hp:c.hp, x:0, y:0, alive:true,
-    shots:c.shots, retals:0, defending:false, poison:0, moraled:false };
+    shots:c.shots, retals:0, defending:false, poison:0, moraled:false, eff:[] };
 }
+function effBonus(u,k){ let v=0; if(u.eff) for(const e of u.eff) if(e.k===k) v+=e.amt; return v; }
+function effSpd(u){ return Math.max(1,CREATURES[u.cid].spd+effBonus(u,"spd")); }
 const SPREAD=[5,4,6,3,7,2,8,1,9,0,10];
 function startBattle(ctx){
   /* ctx: {title, atkHero, atkStacks, defHero, defStacks, wallLv, onEnd(winSide,B)} */
   B={ units:[], obst:new Set(), walls:new Map(), atkHero:ctx.atkHero||null, defHero:ctx.defHero||null,
       ctx, round:0, queue:[], waitQ:[], active:null, auto:false, fast:false,
-      sel:null, reach:new Map(), targets:new Map(), floats:[], logs:[], over:false, hover:null };
+      sel:null, reach:new Map(), targets:new Map(), floats:[], logs:[], over:false, hover:null,
+      cast:[false,false], targeting:null };
   const place=(stacks,side,col)=>{
     let r=0;
     stacks.forEach((s,slot)=>{
@@ -1358,9 +1530,13 @@ function bfloat(x,y,txt,color){ B.floats.push({x,y,txt,color:color||"#ffd95e",t0
 /* ---- rounds & turn order ---- */
 function beginRound(){
   B.round++;
-  for(const u of B.units) if(u.alive){ u.retals=0; u.moraled=false; u.waitedThisRound=false; }
+  B.cast=[false,false];
+  for(const u of B.units) if(u.alive){
+    u.retals=0; u.moraled=false; u.waitedThisRound=false;
+    if(u.eff&&u.eff.length) u.eff=u.eff.filter(e=>--e.r>0);   // spell effects wear off
+  }
   B.queue=B.units.filter(u=>u.alive)
-    .sort((a,b)=>(CREATURES[b.cid].spd-CREATURES[a.cid].spd)||(a.side-b.side)||(a.slot-b.slot));
+    .sort((a,b)=>(effSpd(b)-effSpd(a))||(a.side-b.side)||(a.slot-b.slot));
   B.waitQ=[];
   document.getElementById("bround").textContent="Round "+B.round;
 }
@@ -1368,7 +1544,7 @@ function pickNext(){
   while(!B.over){
     let u=null;
     if(B.queue.length) u=B.queue.shift();
-    else if(B.waitQ.length){ B.waitQ.sort((a,b)=>CREATURES[a.cid].spd-CREATURES[b.cid].spd); u=B.waitQ.shift(); }
+    else if(B.waitQ.length){ B.waitQ.sort((a,b)=>effSpd(a)-effSpd(b)); u=B.waitQ.shift(); }
     else { beginRound(); continue; }
     if(!u.alive) continue;
     /* start-of-turn effects — only on the FIRST activation of the round:
@@ -1414,7 +1590,8 @@ function pump(){
 function finishAction(u,waited){
   if(B.over) return;
   if(checkVictory()) return;      // battle decided: no phantom morale turn on an empty field
-  if(!waited&&!u.moraled&&u.alive&&heroFor(u.side)&&Math.random()<0.10){
+  const hM=heroFor(u.side);
+  if(!waited&&!u.moraled&&u.alive&&hM&&Math.random()<0.05+0.05*skillRank(hM,"cmd")){
     u.moraled=true; computeReach(u);
     blog(`${CREATURES[u.cid].name} surge with <b>morale</b> — they act again!`);
     bfloat(u.x,u.y,"MORALE!","#7fb3ff");
@@ -1425,7 +1602,7 @@ function finishAction(u,waited){
 
 /* ---- reachability ---- */
 function computeReach(u){
-  const spd=CREATURES[u.cid].spd, fly=hasAb(u,"fly");
+  const spd=effSpd(u), fly=hasAb(u,"fly");
   const reach=new Map(); reach.set(hexKey(u.x,u.y),0);
   if(fly){
     for(let y=0;y<BF_H;y++) for(let x=0;x<BF_W;x++){
@@ -1475,8 +1652,8 @@ function calcDamage(att,def,opts){
   const a=CREATURES[att.cid], d=CREATURES[def.cid];
   const hA=opts.heroA!==undefined?opts.heroA:heroFor(att.side);
   const hD=opts.heroD!==undefined?opts.heroD:heroFor(def.side);
-  const atkStat=a.atk+(hA?hA.atk:0);
-  let defStat=d.def+(hD?hD.def:0);
+  const atkStat=a.atk+effStat(hA,"atk")+effBonus(att,"atk");
+  let defStat=d.def+effStat(hD,"def")+effBonus(def,"def");
   if(def.defending) defStat=Math.round(defStat*1.3);
   const roll=opts.roll!==undefined? opts.roll : a.dmin+Math.random()*(a.dmax-a.dmin);
   let dmg=roll*att.n;
@@ -1486,6 +1663,9 @@ function calcDamage(att,def,opts){
   if(opts.ranged&&hexDist(att.x,att.y,def.x,def.y)>10) dmg*=0.5; // long range
   if(opts.ranged&&B&&B.walls.size>0&&att.side===0&&def.x>WALL_COL) dmg*=0.5; // wall cover
   if(opts.melee&&hasAb(att,"charge")) dmg*=1+Math.min(0.5,0.05*(opts.moved||0));
+  if(opts.melee) dmg*=1+0.10*skillRank(hA,"fury");
+  if(opts.ranged) dmg*=1+0.10*skillRank(hA,"marks");
+  dmg*=1-0.05*skillRank(hD,"wall");
   if(opts.luck) dmg*=2;
   return Math.max(1,Math.round(dmg));
 }
@@ -1504,7 +1684,8 @@ function healUnit(u,amount){
 }
 function strike(att,def,opts){
   opts=opts||{};
-  const luck=heroFor(att.side)&&Math.random()<0.10;
+  const hL=heroFor(att.side);
+  const luck=hL&&Math.random()<0.05+0.05*skillRank(hL,"fort");
   const dmg=calcDamage(att,def,Object.assign({},opts,{luck}));
   const killed=applyDamage(def,dmg);
   if(luck) bfloat(att.x,att.y,"LUCK!","#ffd95e");
@@ -1530,6 +1711,90 @@ function strike(att,def,opts){
 }
 function canRetaliate(def,att){
   return def.alive&&!hasAb(att,"no_retal")&&(hasAb(def,"unlim_retal")||def.retals<1);
+}
+
+/* ---- spellcasting (hero, once per round) ---- */
+function canCastNow(side){
+  const h=heroFor(side);
+  return !!h&&!B.cast[side]&&Array.isArray(h.spells)&&h.spells.length>0;
+}
+function spellPower(h){ return effStat(h,"pow")*(1+0.10*skillRank(h,"arc")); }
+function castSpell(side,sid,target){
+  if(B.over||!canCastNow(side)) return {ok:false,why:"Cannot cast now."};
+  const h=heroFor(side), sp=SPELLS[sid];
+  if(!sp||!h.spells.includes(sid)) return {ok:false,why:"Spell unknown."};
+  if(h.mana<sp.cost) return {ok:false,why:"Not enough mana."};
+  const pow=spellPower(h);
+  const res25=u=>hasAb(u,"magic_res");
+  if(sp.target==="enemy"&&(!target||target.side===side||!target.alive)) return {ok:false,why:"Pick an enemy stack."};
+  if(sp.target==="ally"&&(!target||target.side!==side||!target.alive)) return {ok:false,why:"Pick a friendly stack."};
+
+  if(sp.kind==="dmg"||sp.kind==="dmg2"){
+    const hit=(u)=>{
+      let dmg=Math.round(sp.dmg(pow)*(res25(u)?0.75:1));
+      const k=applyDamage(u,dmg);
+      bfloat(u.x,u.y,"-"+dmg,"#b06bd4");
+      blog(`<b>${sp.name}</b> sears ${CREATURES[u.cid].name} for <b>${dmg}</b>${k?` — ${k} fall`:""}.`);
+    };
+    hit(target);
+    if(sp.kind==="dmg2"){
+      let other=null,bd=1e9;
+      for(const u of B.units) if(u.alive&&u.side!==side&&u!==target){
+        const d=hexDist(target.x,target.y,u.x,u.y);
+        if(d<bd){ bd=d; other=u; }
+      }
+      if(other) hit(other);
+    }
+  } else if(sp.kind==="heal"){
+    const amt=Math.round(sp.heal(pow));
+    healUnit(target,amt);
+    bfloat(target.x,target.y,"+"+amt,"#7fb347");
+    blog(`<b>${sp.name}</b> mends ${CREATURES[target.cid].name} for <b>${amt}</b>.`);
+  } else if(sp.kind==="buff"||sp.kind==="debuff"){
+    if(sp.kind==="debuff"&&res25(target)&&Math.random()<0.25){
+      blog(`${CREATURES[target.cid].name} <b>resist</b> ${sp.name}!`);
+      bfloat(target.x,target.y,"RESIST","#7fd4ff");
+    } else {
+      for(const e of sp.eff) target.eff.push({k:e.k,amt:e.amt,r:sp.rounds+1});
+      bfloat(target.x,target.y,sp.kind==="buff"?"▲":"▼",sp.kind==="buff"?"#7fb347":"#d65f2a");
+      blog(`<b>${sp.name}</b> ${sp.kind==="buff"?"blesses":"curses"} ${CREATURES[target.cid].name}.`);
+    }
+  } else if(sp.kind==="summon"){
+    const n=2+Math.floor(pow*2);
+    const u=mkUnit(side,-1,SUMMON_CID,n);
+    u.summoned=true;
+    const col=side===0?0:BF_W-1;
+    u.x=col; u.y=GATE_ROW;
+    for(let r=0;r<SPREAD.length&&!hexFree(u.x,u.y);r++){ u.y=SPREAD[r]; }
+    if(!hexFree(u.x,u.y)){ return {ok:false,why:"No room to summon."}; }
+    B.units.push(u); B.queue.push(u);
+    bfloat(u.x,u.y,"SUMMON","#ffb35e");
+    blog(`<b>${sp.name}</b>: ${n} Ember Sprites answer the call.`);
+  }
+  h.mana-=sp.cost; B.cast[side]=true; B.targeting=null;
+  if(B.active) computeReach(B.active);
+  if(!checkVictory()) syncBattleUI();
+  return {ok:true};
+}
+/* AI hero casting: once per round, simple but sensible */
+function aiMaybeCast(side){
+  const h=heroFor(side);
+  if(!h||B.cast[side]||!Array.isArray(h.spells)||typeof h.mana!=="number") return;
+  if(Math.random()<0.4) return;                     // doesn't always bother
+  const foes=B.units.filter(u=>u.alive&&u.side!==side);
+  const own=B.units.filter(u=>u.alive&&u.side===side);
+  if(!foes.length||!own.length) return;
+  const strongest=arr=>arr.reduce((m,u)=>u.n*CREATURES[u.cid].hp>m.n*CREATURES[m.cid].hp?u:m,arr[0]);
+  const known=h.spells.filter(s=>SPELLS[s]&&h.mana>=SPELLS[s].cost);
+  if(!known.length) return;
+  const pick=k=>known.find(s=>SPELLS[s].kind===k);
+  let sid=pick("dmg"); let target=sid!==undefined?strongest(foes):null;
+  if(sid===undefined){ sid=pick("dmg2"); target=sid!==undefined?strongest(foes):null; }
+  if(sid===undefined){ sid=pick("debuff"); target=sid!==undefined?strongest(foes):null; }
+  if(sid===undefined){ sid=pick("buff"); target=sid!==undefined?strongest(own):null; }
+  if(sid===undefined){ sid=pick("summon"); target=null; }
+  if(sid===undefined) return;
+  castSpell(side,sid,target);
 }
 
 /* ---- unit actions (used by both UI and battle AI) ---- */
@@ -1593,6 +1858,9 @@ function expDmg(att,def,melee){
   return calcDamage(att,def,{roll:(a.dmin+a.dmax)/2,melee,ranged:!melee,moved:0,luck:false});
 }
 function aiActUnit(u){
+  aiMaybeCast(u.side);
+  if(B.over) return;
+  if(!u.alive){ B.active=null; return; }            // the hero's own spell backfired on it
   const foes=B.units.filter(v=>v.alive&&v.side!==u.side);
   if(!foes.length){ finishAction(u,false); return; }
   if(hasAb(u,"ranged")&&u.shots>0&&!adjacentEnemy(u)){
@@ -1639,23 +1907,24 @@ function endBattle(winSide){
   /* write attacker survivors back to the hero's army by slot */
   const surv=side=>B.units.filter(u=>u.side===side);
   if(B.atkHero){
-    for(const u of surv(0)) B.atkHero.army[u.slot]= u.n>0? {c:u.cid,n:u.n}:null;
+    for(const u of surv(0)) if(u.slot>=0)          // summons vanish after battle
+      B.atkHero.army[u.slot]= u.n>0? {c:u.cid,n:u.n}:null;
   }
   /* casualties + XP */
   const lost=side=>surv(side).map(u=>({name:CREATURES[u.cid].name,k:u.n0-u.n})).filter(e=>e.k>0);
   let xp=0;
   if(winSide===0&&B.atkHero){
     xp=surv(1).reduce((s,u)=>s+(u.n0-u.n)*CREATURES[u.cid].hp,0);
-    B.atkHero.xp+=xp;
   }
   const result={winSide,xp,lostA:lost(0),lostD:lost(1),
-    defSurvivors:surv(1).map(u=>({slot:u.slot,c:u.cid,n:u.n}))};
+    defSurvivors:surv(1).filter(u=>u.slot>=0).map(u=>({slot:u.slot,c:u.cid,n:u.n}))};
   B.ctx.onEnd(winSide,result);
   const rows=(list,label)=>`<tr><td>${label}</td><td>${list.length?list.map(e=>`${e.k} ${e.name}`).join(", "):"none"}</td></tr>`;
   showModal(`<h2>${winSide===0?"⚔ VICTORY":"☠ DEFEAT"}</h2>
     <table>${rows(result.lostA,"Your losses")}${rows(result.lostD,"Enemy losses")}
     ${xp?`<tr><td>Experience</td><td>+${xp} XP</td></tr>`:""}</table>
     <div class="mrow"><button id="bDone" class="primary">Continue</button></div>`,true);
+  if(winSide===0&&B.atkHero&&xp>0) gainXp(B.atkHero,xp);   // level-up dialogs follow the result
   document.getElementById("bDone").onclick=()=>{
     closeModal();
     document.getElementById("battle").classList.remove("show");
@@ -1728,8 +1997,20 @@ function drawBattle(time){
       if(hp===1){ g.strokeStyle="#1c130b"; g.beginPath(); g.moveTo(c.x-6,c.y-8); g.lineTo(c.x+2,c.y); g.lineTo(c.x-3,c.y+8); g.stroke(); }
     }
   }
+  /* spell targeting: ring every legal target */
+  if(B.targeting){
+    const sp=SPELLS[B.targeting.sid];
+    for(const u of B.units){
+      if(!u.alive) continue;
+      const legal= sp.target==="enemy"? u.side!==B.targeting.side : u.side===B.targeting.side;
+      if(!legal) continue;
+      const c=hexCenter(u.x,u.y);
+      hexPath(g,c.x,c.y,bGeom.R-1.5);
+      g.strokeStyle="#b06bd4"; g.lineWidth=2+Math.sin(time/180); g.stroke();
+    }
+  }
   /* hover target ring */
-  if(B.hover&&humanTurn){
+  if(B.hover&&humanTurn&&!B.targeting){
     const t=unitAt(B.hover.x,B.hover.y), k=hexKey(B.hover.x,B.hover.y);
     const c=hexCenter(B.hover.x,B.hover.y);
     if((t&&t.side!==act.side&&(B.targets.has(k)||canShootNow(act)))||(B.targets.get(k)&&B.targets.get(k).wall)){
@@ -1759,6 +2040,12 @@ function drawBattle(time){
     g.textAlign="left";
     if(u.defending){ g.fillStyle="#c9ccc9"; g.font="9px monospace"; g.fillText("🛡",c.x+bw/2+1,c.y+bGeom.R*0.28+9); }
     if(u.poison>0){ g.fillStyle="#9fd45f"; g.fillRect(c.x-bw/2-4,c.y+bGeom.R*0.28,3,12); }
+    if(u.eff&&u.eff.length){
+      const buffed=u.eff.some(e=>e.amt>0), cursed=u.eff.some(e=>e.amt<0);
+      g.font="bold 9px monospace";
+      if(buffed){ g.fillStyle="#7fb347"; g.fillText("▲",c.x-bw/2-11,c.y+bGeom.R*0.28+10); }
+      if(cursed){ g.fillStyle="#d65f2a"; g.fillText("▼",c.x+bw/2+3,c.y+bGeom.R*0.28+22); }
+    }
   }
   /* floating texts */
   const now=performance.now();
@@ -1778,7 +2065,7 @@ function syncBattleUI(){
   const bar=document.getElementById("bturnbar");
   bar.innerHTML="";
   const seq=[B.active,...B.queue,
-    ...[...B.waitQ].sort((a,b)=>CREATURES[a.cid].spd-CREATURES[b.cid].spd)]
+    ...[...B.waitQ].sort((a,b)=>effSpd(a)-effSpd(b))]
     .filter(u=>u&&u.alive).slice(0,14);
   seq.forEach((u,i)=>{
     const div=document.createElement("div");
@@ -1790,6 +2077,11 @@ function syncBattleUI(){
   const mine=B.active&&controlledByHuman(B.active);
   document.getElementById("bWait").disabled=!mine||B.active.waitedThisRound;
   document.getElementById("bDefend").disabled=!mine;
+  const side=mine?B.active.side:-1;
+  const h=side>=0?heroFor(side):null;
+  document.getElementById("bCast").disabled=!(mine&&h&&canCastNow(side)&&h.spells.some(s=>SPELLS[s]&&h.mana>=SPELLS[s].cost));
+  document.getElementById("bround").textContent=
+    "Round "+B.round+(h?` · ✨ ${h.mana} mana`:"");
 }
 bcanvas.addEventListener("pointermove",e=>{
   if(!B||!bGeom) return;
@@ -1801,6 +2093,13 @@ bcanvas.addEventListener("pointerup",e=>{
   const r=bcanvas.getBoundingClientRect();
   const h=pxToHex(e.clientX-r.left,e.clientY-r.top);
   if(!h) return;
+  if(B.targeting){                               // spell targeting mode
+    const tg=unitAt(h.x,h.y);
+    if(!tg){ B.targeting=null; toast("Spell cancelled."); syncBattleUI(); return; }
+    const res=castSpell(B.targeting.side,B.targeting.sid,tg);
+    if(!res.ok) toast(res.why);
+    return;
+  }
   const u=B.active, k=hexKey(h.x,h.y), t=unitAt(h.x,h.y);
   let acted=false;
   if(t&&t.side!==u.side){
@@ -1812,6 +2111,33 @@ bcanvas.addEventListener("pointerup",e=>{
   else if(!t&&B.reach.has(k)&&(h.x!==u.x||h.y!==u.y)) acted=actMoveOnly(u,h.x,h.y);
   if(acted) pump();
 });
+document.getElementById("bCast").onclick=()=>{
+  if(!B||!B.active||!controlledByHuman(B.active)) return;
+  const side=B.active.side, h=heroFor(side);
+  if(!canCastNow(side)){ toast(B.cast[side]?"Already cast this round.":"No spells."); return; }
+  if(B.targeting){ B.targeting=null; toast("Spell cancelled."); return; }
+  const rows=h.spells.map(s=>{
+    const sp=SPELLS[s], can=h.mana>=sp.cost;
+    return `<button data-spell="${s}" ${can?"":"disabled"} style="text-align:left">
+      <b>${sp.name}</b> · ${sp.cost} ✨<br><small class="sub">${sp.desc}</small></button>`;
+  }).join("");
+  showModal(`<h2>✨ Spellbook — ${h.mana} mana</h2>
+    <div class="mrow" style="flex-direction:column">${rows}</div>
+    <div class="mrow"><button onclick="closeModal()">Cancel</button></div>`);
+  modalEl.querySelectorAll("[data-spell]").forEach(b=>{
+    b.onclick=()=>{
+      const sid=+b.dataset.spell, sp=SPELLS[sid];
+      closeModal();
+      if(sp.target==="none"){
+        const res=castSpell(side,sid,null);
+        if(!res.ok) toast(res.why);
+      } else {
+        B.targeting={sid,side};
+        toast(`${sp.name}: tap ${sp.target==="enemy"?"an enemy":"a friendly"} stack (tap empty ground to cancel).`);
+      }
+    };
+  });
+};
 document.getElementById("bWait").onclick=()=>{
   if(B&&B.active&&controlledByHuman(B.active)&&actWait(B.active)) pump();
 };
@@ -2076,10 +2402,11 @@ function newDay(){
     }
   }
   for(const h of G.heroes){
-    h.mp=h.maxMp;
-    h.mana=Math.min(h.maxMana,h.mana+h.know);
+    h.maxMp=calcMaxMp(h); h.mp=h.maxMp;
+    h.maxMana=calcMaxMana(h);
+    h.mana=Math.min(h.maxMana,h.mana+1+2*skillRank(h,"myst"));
     const t=objectAt(h.x,h.y);                      // resting under a mage guild
-    if(t&&t.t==="town"&&t.owner===h.owner&&t.bld.guild) h.mana=h.maxMana;
+    if(t&&t.t==="town"&&t.owner===h.owner&&t.bld.guild){ h.mana=h.maxMana; learnAtGuild(h,t); }
   }
   if(d.day===1) toast(`— A new week dawns (Month ${d.month}, Week ${d.week}). Dwellings regrow. —`);
   else toast(`Day ${d.day}, Week ${d.week}, Month ${d.month}. Income collected.`);
@@ -2113,6 +2440,7 @@ function closeModal(){
   modalEl.scrollTop=0;                            // next open starts at the top
   modalBack.classList.remove("show"); modalLocked=false; townSel=null;
   document.getElementById("app").inert=false;
+  if(lvlQueue.length) presentNextLevelUp();       // queued level-ups surface next
 }
 modalBack.addEventListener("pointerdown",e=>{ if(e.target===modalBack&&!modalLocked) closeModal(); });
 
@@ -2170,26 +2498,109 @@ function refreshUI(){
   const et=document.getElementById("endTurn");
   et.disabled = G.cur!==0;
 }
+let heroSel=null;   // selected army slot index in the hero panel
 function openHeroPanel(h){
-  const arts = h.artifacts.length
-    ? h.artifacts.map(i=>`<tr><td>◆ ${ARTIFACTS[i].name}</td><td>${ARTIFACTS[i].desc}*</td></tr>`).join("")
-    : `<tr><td class="sub" colspan="2">No artifacts carried.</td></tr>`;
+  heroSel=null;
+  renderHeroPanel(h);
+}
+function renderHeroPanel(h){
+  const stat=(label,s)=>{
+    const base=h[s], eff=effStat(h,s);
+    return `<div class="st">${label}<b>${eff}${eff!==base?` <small class="sub">(${base}+${eff-base})</small>`:""}</b></div>`;
+  };
   const armySlots=h.army.map((s,i)=>
-    `<div class="slot" title="${s?CREATURES[s.c].name+" — "+creStatLine(s.c):"empty slot"}">${
+    `<div class="slot${heroSel===i?" sel":""}" data-hslot="${i}" title="${s?CREATURES[s.c].name+" — "+creStatLine(s.c):"empty slot"}">${
       s? `<span class="icon" data-cid="${s.c}"></span><span class="cnt">${s.n}</span>`:`<span class="sub">—</span>`}</div>`).join("");
+  const selStack=heroSel!==null?h.army[heroSel]:null;
+  const canSplit=selStack&&selStack.n>1&&h.army.some(s=>!s);
+  const skills=Object.keys(h.skills||{}).length
+    ? Object.entries(h.skills).map(([id,r])=>`<tr><td>${RANK_NAME[r]} ${SKILL_BY_ID[id].name}</td><td>${SKILL_BY_ID[id].fx(r)}</td></tr>`).join("")
+    : `<tr><td class="sub" colspan="2">No skills yet — level up to learn.</td></tr>`;
+  const spells=(h.spells||[]).map(s=>`<tr><td>✨ ${SPELLS[s].name} <small class="sub">${SPELLS[s].cost} mana</small></td><td>${SPELLS[s].desc}</td></tr>`).join("");
+  /* equipment: 5 slots + backpack */
+  const worn=new Set(EQUIP_SLOTS.map(sl=>h.equip[sl]).filter(p=>p>=0));
+  const slotRow=EQUIP_SLOTS.map(sl=>{
+    const pos=h.equip[sl];
+    const a=pos>=0?ARTIFACTS[h.artifacts[pos]]:null;
+    return `<button data-eqslot="${sl}" class="eqslot" title="${a?a.desc+" — tap to remove":sl}">${
+      a?`◆ ${a.name}`:`<span class="sub">${sl}</span>`}</button>`;
+  }).join("");
+  const packItems=h.artifacts.map((aid,pos)=>worn.has(pos)?"":
+    `<button data-pack="${pos}" title="${ARTIFACTS[aid].desc} — tap to equip">◇ ${ARTIFACTS[aid].name}</button>`).join("");
+  const next=xpNeeded(h.level);
   showModal(`<h2>🛡 ${h.name}</h2>
-    <div class="sub">${FACTIONS[h.fac].name} · Level ${h.level} · ${h.xp} XP (level-ups arrive in Phase 4)</div>
+    <div class="sub">${FACTIONS[h.fac].name} · Level ${h.level} · ${h.xp}/${next} XP</div>
     <div class="statgrid">
-      <div class="st">Attack<b>${h.atk}</b></div><div class="st">Defense<b>${h.def}</b></div>
-      <div class="st">Power<b>${h.pow}</b></div><div class="st">Knowledge<b>${h.know}</b></div>
-      <div class="st">Movement<b>${Math.round(h.mp)}/${h.maxMp}</b></div><div class="st">Mana<b>${h.mana}/${h.maxMana}</b></div>
+      ${stat("Attack","atk")}${stat("Defense","def")}${stat("Power","pow")}${stat("Knowledge","know")}
+      <div class="st">Movement<b>${Math.round(h.mp)}/${h.maxMp}</b></div>
+      <div class="st">Mana<b>${h.mana}/${h.maxMana}</b></div>
     </div>
-    <div class="sect"><div class="ptitle">ARMY</div><div class="slotrow">${armySlots}</div>
-    <div class="sub">Exchange troops in a town; full army management arrives in Phase 4.</div></div>
-    <table>${arts}</table>
-    <p class="sub" style="margin-top:6px">*Artifact stat bonuses and the spellbook activate in Phase 4.</p>
-    <div class="mrow"><button onclick="closeModal()">Close</button></div>`);
+    <div class="sect"><div class="ptitle">ARMY — tap a stack, then a slot (merge/swap)</div>
+      <div class="slotrow">${armySlots}</div>
+      <div class="mrow">${canSplit?`<button id="btnSplit">✂ Split stack</button>`:""}</div></div>
+    <div class="sect"><div class="ptitle">EQUIPMENT</div>
+      <div class="mrow" style="flex-direction:column;gap:4px">${slotRow}</div>
+      ${packItems?`<div class="ptitle" style="margin-top:6px">BACKPACK</div><div class="mrow" style="flex-direction:column;gap:4px">${packItems}</div>`:""}</div>
+    <div class="sect"><div class="ptitle">SKILLS</div><table>${skills}</table></div>
+    <div class="sect"><div class="ptitle">SPELLBOOK</div><table>${spells}</table></div>
+    <div class="mrow"><button onclick="closeModal()">Close</button></div>`,false,"wide");
   modalEl.querySelectorAll(".icon").forEach(el=>el.appendChild(creatureIcon(+el.dataset.cid)));
+  modalEl.querySelectorAll("[data-hslot]").forEach(el=>{
+    el.onclick=()=>heroSlotClick(h,+el.dataset.hslot);
+  });
+  modalEl.querySelectorAll("[data-eqslot]").forEach(el=>{
+    el.onclick=()=>{ if(unequipArtifact(h,el.dataset.eqslot)) renderHeroPanel(h); };
+  });
+  modalEl.querySelectorAll("[data-pack]").forEach(el=>{
+    el.onclick=()=>{ if(equipArtifact(h,+el.dataset.pack)) renderHeroPanel(h); };
+  });
+  const sp=document.getElementById("btnSplit");
+  if(sp) sp.onclick=()=>openSplitDialog(h,heroSel);
+}
+function heroSlotClick(h,i){
+  if(heroSel===null){
+    if(h.army[i]) heroSel=i;
+  } else if(heroSel===i){
+    heroSel=null;
+  } else {
+    const src=h.army[heroSel], dst=h.army[i];
+    if(dst&&dst.c===src.c){ dst.n+=src.n; h.army[heroSel]=null; }
+    else { h.army[i]=src; h.army[heroSel]=dst||null; }       // move or swap
+    heroSel=null;
+  }
+  renderHeroPanel(h);
+}
+function splitStack(h,from,amount){
+  const s=h.army[from];
+  amount=Math.floor(amount);
+  if(!s||!Number.isFinite(amount)||amount<1||amount>=s.n) return false;
+  const empty=h.army.findIndex(x=>!x);
+  if(empty<0) return false;
+  s.n-=amount;
+  h.army[empty]={c:s.c,n:amount};
+  return true;
+}
+function openSplitDialog(h,from){
+  const s=h.army[from];
+  if(!s) return;
+  let amt=Math.floor(s.n/2)||1;
+  showModal(`<h2>✂ Split ${CREATURES[s.c].name}</h2>
+    <p class="sub">Take how many of the ${s.n} into a new stack?</p>
+    <div class="mrow" style="align-items:center;justify-content:center">
+      <button id="sM">−10</button><button id="sm">−1</button>
+      <b id="sAmt" style="min-width:60px;text-align:center;font-size:20px;color:var(--gold2)">${amt}</b>
+      <button id="sp1">+1</button><button id="sP">+10</button>
+    </div>
+    <div class="mrow"><button id="sHalf">Half</button><button id="sGo" class="primary">Split</button><button id="sNo">Cancel</button></div>`);
+  const clampA=v=>clamp(v,1,s.n-1);
+  const set=v=>{ amt=clampA(v); document.getElementById("sAmt").textContent=amt; };
+  document.getElementById("sM").onclick=()=>set(amt-10);
+  document.getElementById("sm").onclick=()=>set(amt-1);
+  document.getElementById("sp1").onclick=()=>set(amt+1);
+  document.getElementById("sP").onclick=()=>set(amt+10);
+  document.getElementById("sHalf").onclick=()=>set(Math.floor(s.n/2));
+  document.getElementById("sGo").onclick=()=>{ splitStack(h,from,amt); heroSel=null; renderHeroPanel(h); };
+  document.getElementById("sNo").onclick=()=>renderHeroPanel(h);
 }
 /* =============================================================================
    TOWN SCREEN
@@ -2337,7 +2748,7 @@ function slotClick(t,arr,i){
 }
 function showHelp(){
   if(B){ toast("Finish the battle first."); return; }
-  showModal(`<h2>How to play — Phase 3</h2>
+  showModal(`<h2>How to play — Phase 4</h2>
     <table>
     <tr><td>Move</td><td>tap/click a tile → route preview, tap again → march</td></tr>
     <tr><td>Pan / zoom</td><td>drag · pinch, wheel, or +/−</td></tr>
@@ -2349,7 +2760,9 @@ function showHelp(){
     <tr><td>Tavern</td><td>hire extra heroes (2500g, max 4)</td></tr>
     <tr><td>Market</td><td>trade resources; more markets, better rates</td></tr>
     <tr><td>Battle</td><td>tap a guard, enemy hero, or garrisoned town twice to attack</td></tr>
-    <tr><td>In combat</td><td>tap a green hex to move, an enemy to strike/shoot · Wait (W) · Defend (D) · Auto resolves for you</td></tr>
+    <tr><td>In combat</td><td>tap a green hex to move, an enemy to strike/shoot · Wait (W) · Defend (D) · ✨ Cast once per round · Auto resolves for you</td></tr>
+    <tr><td>Heroes</td><td>battles and chests grant XP — each level: +1 stat and a skill choice; tap your hero to manage army (split/merge/swap), gear, and spells</td></tr>
+    <tr><td>Spells</td><td>mana = Knowledge ×10, trickles back daily; visit a Mage Guild town to learn its four spells (and refill overnight)</td></tr>
     <tr><td>Sieges</td><td>walls block the ground — batter them, fly over, or push the gate row</td></tr>
     <tr><td>End turn</td><td>⌛ button or E — restores movement, pays income</td></tr>
     </table>
@@ -2392,6 +2805,31 @@ function loadFrom(json){
     if(typeof h.mp!=="number"||!isFinite(h.mp)||typeof h.maxMp!=="number") bad("Corrupt hero data.");
     h.fac=h.fac===1?1:0;
     h.artifacts=Array.isArray(h.artifacts)? h.artifacts.filter(i=>Number.isInteger(i)&&i>=0&&i<ARTIFACTS.length):[];
+    /* Phase 4 fields: normalize with defaults so older saves keep working */
+    h.level=Number.isInteger(h.level)&&h.level>=1? h.level:1;
+    h.xp=Number.isFinite(h.xp)&&h.xp>=0? h.xp:0;
+    const sk={};
+    if(h.skills&&typeof h.skills==="object"&&!Array.isArray(h.skills))
+      for(const [k,v] of Object.entries(h.skills))
+        if(SKILL_BY_ID[k]&&Number.isInteger(v)&&v>=1&&v<=3) sk[k]=v;
+    h.skills=sk;
+    h.spells=Array.isArray(h.spells)
+      ? [...new Set(h.spells.filter(s=>Number.isInteger(s)&&s>=0&&s<SPELLS.length))]
+      : START_SPELLS(h.fac).slice();
+    const eq={weapon:-1,armor:-1,helm:-1,misc1:-1,misc2:-1};
+    if(h.equip&&typeof h.equip==="object"){
+      const used=new Set();
+      for(const sl of EQUIP_SLOTS){
+        const p=h.equip[sl];
+        if(Number.isInteger(p)&&p>=0&&p<h.artifacts.length&&!used.has(p)
+           &&slotFor(h.artifacts[p]).includes(sl)){ eq[sl]=p; used.add(p); }
+      }
+    }
+    h.equip=eq;
+    h.maxMana=calcMaxMana(h);
+    h.mana=Number.isFinite(h.mana)? clamp(h.mana,0,h.maxMana):h.maxMana;
+    h.maxMp=calcMaxMp(h);
+    h.mp=clamp(h.mp,0,h.maxMp);
     if(d.v===2&&!Array.isArray(h.army)) bad("Corrupt army data.");
     h.army=normArmy(h.army);
     if(!h.army.every(validStack)) bad("Corrupt army data.");
@@ -2610,6 +3048,11 @@ window.addEventListener("keydown",e=>{
   if(B){                                     // battle hotkeys only
     if(e.key==="w"||e.key==="W") document.getElementById("bWait").click();
     if(e.key==="d"||e.key==="D") document.getElementById("bDefend").click();
+    if(e.key==="c"||e.key==="C") document.getElementById("bCast").click();
+    if(e.key==="Escape"){
+      if(B.targeting){ B.targeting=null; toast("Spell cancelled."); }
+      else if(modalBack.classList.contains("show")&&!modalLocked) closeModal();
+    }
     return;
   }
   const t=e.target;
@@ -2708,6 +3151,11 @@ window.EV={
   canBuild, doBuild, recruitInto, hireHero, tradeRes, townCreature, maxRecruit,
   playerTowns, visitingHero, openTownPanel, closeModal,
   CREATURES, ROSTER, BLD,
+  /* hero progression (Phase 4) */
+  gainXp, xpNeeded, effStat, skillRank, applySkill, SPELLS, SKILLS, ARTIFACTS,
+  equipArtifact, unequipArtifact, splitStack, learnAtGuild, guildSpells,
+  castSpell, canCastNow, calcMaxMp, calcMaxMana,
+  get lvlQueue(){ return lvlQueue; },
   /* battle hooks */
   get B(){ return B; },
   calcDamage, applyDamage, hostileInfoAt, townDefended, startBattle, rebuildOcc,
