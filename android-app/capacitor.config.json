@@ -1,0 +1,8 @@
+{
+  "appId": "com.embervale.game",
+  "appName": "Embervale",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#100d0a"
+  }
+}

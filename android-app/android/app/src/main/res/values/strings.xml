@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Embervale</string>
+    <string name="title_activity_main">Embervale</string>
+    <string name="package_name">com.embervale.game</string>
+    <string name="custom_url_scheme">com.embervale.game</string>
+</resources>
