@@ -127,6 +127,9 @@
   #subtitle{color:var(--ink2);letter-spacing:2px;margin-top:-8px}
   #menu input{background:#0d0b08;border:2px solid var(--edge2);color:var(--ink);padding:9px;font-family:inherit;
     font-size:14px;width:220px;text-align:center}
+  #diffRow{display:flex;gap:0;border:2px solid var(--edge2);border-radius:3px;overflow:hidden}
+  #diffRow button{border:none;border-radius:0;min-height:38px;padding:6px 14px}
+  #diffRow button.on{background:linear-gradient(#6b4a1c,#4a3313);color:var(--gold2)}
   #menu .note{color:var(--ink2);font-size:12px;max-width:430px;line-height:1.5}
   #phase{position:absolute;bottom:8px;right:10px;color:#4c4232;font-size:11px}
   /* ---- mobile layout ---- */
@@ -189,6 +192,7 @@
       <button id="bWait">⏳ Wait</button>
       <button id="bDefend">🛡 Defend</button>
       <button id="bAuto">⚡ Auto</button>
+      <button id="bFlee">🏳 Flee</button>
     </div>
     <div id="blog"></div>
   </div>
@@ -201,6 +205,10 @@
   <div id="subtitle">— RIVAL CROWNS —</div>
   <div class="note">A realm torn between the <b style="color:var(--blue)">Order of the Dawnspire</b> and the
     <b style="color:var(--red)">Duskmire Covenant</b>. Claim mines, gather treasure, and seize every enemy town.</div>
+  <div id="diffRow">
+    <button data-diff="0">🌿 Easy</button><button data-diff="1" class="on">⚔ Normal</button><button data-diff="2">💀 Hard</button>
+  </div>
+  <div class="note" id="diffNote">Normal — lighter guards than the old build, a fair fight.</div>
   <input id="seedInput" placeholder="seed (blank = random)" inputmode="numeric">
   <button class="primary" id="btnNew" style="width:220px">⚔ NEW CAMPAIGN</button>
   <button id="btnResume" style="width:220px;display:none">↩ Resume</button>
@@ -316,6 +324,16 @@ function guildSpells(t){
   return out;
 }
 const GUARD_KINDS = ["Bramble Wolves","Barrow Wights","Mire Serpents","Stone Gnashers","Feral Harpies","Gloom Bats"];
+
+/* difficulty: guard sizes, starting boosts, AI economy */
+const DIFFS=[
+  { name:"Easy",   guard:0.45, res:1.5, heroT1:16, heroT2:6, aiIncome:0.9,  aiHeroBoost:1,
+    note:"Easy — small guard packs, a fat treasury, and extra starting troops." },
+  { name:"Normal", guard:0.7,  res:1,   heroT1:12, heroT2:4, aiIncome:1,    aiHeroBoost:1,
+    note:"Normal — lighter guards than the old build, a fair fight." },
+  { name:"Hard",   guard:1.1,  res:1,   heroT1:12, heroT2:4, aiIncome:1.3,  aiHeroBoost:1.5,
+    note:"Hard — big guard packs and a Covenant with deep pockets." },
+];
 
 /* =============================================================================
    CREATURES — 2 factions x 7 tiers x (base + upgrade).
@@ -465,7 +483,8 @@ function fbm(x,y,seed){
   return 0.55*vnoise(x/7.3,y/7.3,seed) + 0.30*vnoise(x/3.4,y/3.4,seed+77) + 0.15*vnoise(x/1.7,y/1.7,seed+191);
 }
 
-function generateWorld(seed){
+function generateWorld(seed,diff){
+  diff=DIFFS[diff]?diff:1;
   const rnd = mulberry32(seed);
   const terr = new Uint8Array(MAPW*MAPH);
   const objects = [];
@@ -581,10 +600,12 @@ function generateWorld(seed){
     const s=findSpotRetry(6+Math.floor(rnd()*18),6+Math.floor(rnd()*18),6); if(!s) continue;
     addPair({t:"art", art:Math.floor(rnd()*ARTIFACTS.length), x:s.x, y:s.y});
   }
+  const gMult=(DIFFS[diff]||DIFFS[1]).guard;
   for(let i=0;i<5;i++){
     const s=findSpotRetry(8+Math.floor(rnd()*16),8+Math.floor(rnd()*16),7); if(!s) continue;
     const cre=pick(rnd,GUARD_KINDS);
-    addPair({t:"guard", cre, cid:NEUTRAL_BY_NAME[cre], n:8+Math.floor(rnd()*20), x:s.x, y:s.y});
+    const n=Math.max(3,Math.round((8+Math.floor(rnd()*20))*gMult));
+    addPair({t:"guard", cre, cid:NEUTRAL_BY_NAME[cre], n, x:s.x, y:s.y});
   }
 
   /* --- starting heroes --- */
@@ -645,9 +666,13 @@ function generateWorld(seed){
     if(o.t!=="town") continue;
     initTownState(o, o.slot===0);
   }
-  /* starting armies: a band of tier-1 and tier-2 troops */
+  /* starting armies: a band of tier-1 and tier-2 troops.
+     Easy boosts the player's band; Hard boosts the Covenant's. */
+  const D=DIFFS[diff];
   for(const h of heroes){
-    h.army=[{c:ROSTER[h.fac][0][0],n:12},{c:ROSTER[h.fac][1][0],n:4},null,null,null,null,null];
+    let t1=D.heroT1, t2=D.heroT2;
+    if(h.owner===1){ t1=Math.round(12*D.aiHeroBoost); t2=Math.round(4*D.aiHeroBoost); }
+    h.army=[{c:ROSTER[h.fac][0][0],n:t1},{c:ROSTER[h.fac][1][0],n:t2},null,null,null,null,null];
   }
 
   return { terr, objects, heroes, nextId };
@@ -1320,12 +1345,15 @@ function heroById(id){ return G.heroes.find(h=>h.id===id); }
 function selectedHero(){ return UI.selected? G.heroes.find(h=>h.id===UI.selected && h.owner===0):null; }
 const INTERACTIVE={pile:1,chest:1,art:1,mine:1,town:1,guard:1};
 
-function makeGame(seed){
-  const w=generateWorld(seed);
+function makeGame(seed,diff){
+  diff=DIFFS[diff]?diff:1;
+  const w=generateWorld(seed,diff);
+  const D=DIFFS[diff], r=D.res;
   return {
-    v:1, seed, day:1, cur:0, nextId:w.nextId, doom:[null,null], over:null,
+    v:1, seed, diff, day:1, cur:0, nextId:w.nextId, doom:[null,null], over:null,
     players:[
-      { name:"you", fac:0, gold:10000, wood:20, ore:20, moon:5, ember:5, ai:false },
+      { name:"you", fac:0, gold:Math.round(10000*r), wood:Math.round(20*r), ore:Math.round(20*r),
+        moon:Math.round(5*r), ember:Math.round(5*r), ai:false },
       { name:"Duskmire", fac:1, gold:10000, wood:20, ore:20, moon:5, ember:5, ai:true },
     ],
     terr:w.terr, objects:w.objects, heroes:w.heroes,
@@ -2098,6 +2126,46 @@ function aiActUnit(u){
   if(mv&&!(mv.x===u.x&&mv.y===u.y)) actMoveOnly(u,mv.x,mv.y);
   else actDefend(u);
 }
+/* ---- fleeing: the hero escapes, the army does not ---- */
+function humanSide(){
+  if(!B) return -1;
+  if(B.ctx.atkOwner===0) return 0;
+  if(B.ctx.defOwner===0) return 1;
+  return -1;
+}
+function canFlee(){
+  if(!B||B.over) return false;
+  const s=humanSide(); if(s<0) return false;
+  const h=heroFor(s);
+  return !!h && G.heroes.includes(h) && townCount(0)>0;
+}
+function doFlee(){
+  if(!canFlee()) return;
+  const s=humanSide();
+  B.fledSide=s; B.targeting=null;
+  for(const u of B.units) if(u.side===s){ u.alive=false; u.n=0; }
+  blog("The banner is struck — a full retreat!");
+  checkVictory();
+}
+function rescueHero(h){
+  const towns=G.objects.filter(o=>o.t==="town"&&!o.dead&&o.owner===h.owner);
+  if(!towns.length){ killHero(h); return; }
+  towns.sort((a,b)=>(Math.abs(a.x-h.x)+Math.abs(a.y-h.y))-(Math.abs(b.x-h.x)+Math.abs(b.y-h.y)));
+  const t=towns[0];
+  occHero[idx(h.x,h.y)]=0;
+  let placed=false;
+  for(let r=1;r<=3&&!placed;r++)
+    for(let dy=-r;dy<=r&&!placed;dy++) for(let dx=-r;dx<=r&&!placed;dx++){
+      const x=t.x+dx, y=t.y+dy;
+      if(inMap(x,y)&&passableTransit(x,y)){ h.x=x; h.y=y; placed=true; }
+    }
+  if(!placed){ killHero(h); return; }
+  h.army=[{c:ROSTER[h.fac][0][0],n:1},null,null,null,null,null,null];
+  h.mp=0; h.mpSpent=h.maxMp;
+  occHero[idx(h.x,h.y)]=h.id;
+  toast(`${h.name} flees to ${t.name} — the army is lost, but the hero lives.`,"bad");
+  recomputeVisible();
+}
 function checkVictory(){
   if(!B||B.over) return true;
   const a=B.units.some(u=>u.alive&&u.side===0);
@@ -2122,7 +2190,7 @@ function endBattle(winSide){
   if(winSide===0&&B.atkHero){
     xp=surv(1).reduce((s,u)=>s+(u.n0-u.n)*CREATURES[u.cid].hp,0);
   }
-  const result={winSide,xp,lostA:lost(0),lostD:lost(1),
+  const result={winSide,xp,lostA:lost(0),lostD:lost(1),fled:B.fledSide,
     defSurvivors:surv(1).filter(u=>u.slot>=0).map(u=>({slot:u.slot,c:u.cid,n:u.n}))};
   if(B.ctx.silent){
     /* AI-vs-AI or AI-vs-neutral: apply the outcome without any UI */
@@ -2355,6 +2423,7 @@ function syncBattleUI(){
   const side=mine?B.active.side:-1;
   const h=side>=0?heroFor(side):null;
   document.getElementById("bCast").disabled=!(mine&&h&&canCastNow(side)&&h.spells.some(s=>SPELLS[s]&&h.mana>=SPELLS[s].cost));
+  document.getElementById("bFlee").disabled=!(mine&&canFlee());
   document.getElementById("bround").textContent=
     "Round "+B.round+(h?` · ✨ ${h.mana} mana`:"");
 }
@@ -2413,6 +2482,17 @@ document.getElementById("bCast").onclick=()=>{
     };
   });
 };
+document.getElementById("bFlee").onclick=()=>{
+  if(!B||!B.active||!controlledByHuman(B.active)) return;
+  if(!canFlee()){
+    toast(townCount(0)? "Only a hero-led army can flee." : "Nowhere to flee — you hold no towns!");
+    return;
+  }
+  showModal(`<h2>🏳 Flee the field?</h2>
+    <p class="sub">Your hero escapes to the nearest town with their life, level, and artifacts — but every soldier is abandoned.</p>
+    <div class="mrow"><button id="fleeYes" class="primary">Flee</button><button onclick="closeModal()">Fight on</button></div>`);
+  document.getElementById("fleeYes").onclick=()=>{ closeModal(); doFlee(); };
+};
 document.getElementById("bWait").onclick=()=>{
   if(B&&B.active&&controlledByHuman(B.active)&&actWait(B.active)) pump();
 };
@@ -2461,7 +2541,7 @@ function launchBattleFromMap(hero,hi){
       onEnd:(win,res)=>{
         const left=res.defSurvivors.reduce((s,u)=>s+u.n,0);
         if(win===0){ killObject(obj); if(mine) toast(`The ${obj.cre} are slain. +${res.xp} XP`,"good"); }
-        else { obj.n=Math.max(1,left); killHero(hero); }
+        else { obj.n=Math.max(1,left); if(res.fled===0) rescueHero(hero); else killHero(hero); }
         checkVictoryMap();
       }});
   } else if(hi.type==="hero"){
@@ -2472,13 +2552,16 @@ function launchBattleFromMap(hero,hi){
       atkOwner:hero.owner, defOwner:foe.owner, silent:hero.owner!==0&&foe.owner!==0,
       onEnd:(win,res)=>{
         if(win===0){
-          killHero(foe);
-          toast(mine? `${foe.name} is defeated! +${res.xp} XP`
-                    : `${foe.name} has fallen to ${hero.name} of the Covenant!`, mine?"good":"bad");
+          if(res.fled===1){ rescueHero(foe); }
+          else{
+            killHero(foe);
+            toast(mine? `${foe.name} is defeated! +${res.xp} XP`
+                      : `${foe.name} has fallen to ${hero.name} of the Covenant!`, mine?"good":"bad");
+          }
         } else {
           for(const u of res.defSurvivors) foe.army[u.slot]= u.n>0? {c:u.c,n:u.n}:null;
-          killHero(hero);
-          if(!mine) toast(`${foe.name} repels ${hero.name}!`,"good");
+          if(res.fled===0) rescueHero(hero); else killHero(hero);
+          if(!mine&&res.fled!==0) toast(`${foe.name} repels ${hero.name}!`,"good");
         }
         checkVictoryMap();
       }});
@@ -2499,8 +2582,8 @@ function launchBattleFromMap(hero,hi){
           const ng=[null,null,null,null,null,null,null];
           for(const u of res.defSurvivors) if(u.n>0) ng[u.slot]={c:u.c,n:u.n};
           t.garr=ng;
-          killHero(hero);
-          if(!mine) toast(`The garrison of ${t.name} holds!`,"good");
+          if(res.fled===0) rescueHero(hero); else killHero(hero);
+          if(!mine&&res.fled!==0) toast(`The garrison of ${t.name} holds!`,"good");
         }
         checkVictoryMap();
       }});
@@ -2805,7 +2888,8 @@ function tradeRes(p,kind,dir,qty){
 function applyIncome(){
   for(let p=0;p<2;p++){
     const inc=incomeOf(p);
-    for(const k of RES_KEYS) G.players[p][k]+=inc[k];
+    const m=p===1? (DIFFS[G.diff]||DIFFS[1]).aiIncome : 1;
+    for(const k of RES_KEYS) G.players[p][k]+=k==="gold"? Math.round(inc[k]*m) : inc[k];
   }
 }
 function dateParts(){
@@ -3211,7 +3295,8 @@ function showHelp(){
     <tr><td>Armies</td><td>tap a stack then a slot to move troops between garrison and hero</td></tr>
     <tr><td>Tavern</td><td>hire extra heroes (2500g, max 4)</td></tr>
     <tr><td>Market</td><td>trade resources; more markets, better rates</td></tr>
-    <tr><td>Battle</td><td>tap a guard, enemy hero, or garrisoned town twice to attack</td></tr>
+    <tr><td>Battle</td><td>tap a guard, enemy hero, or garrisoned town twice to attack — the hint tells you how dangerous the fight looks</td></tr>
+    <tr><td>Flee</td><td>🏳 in battle saves your hero (level, gear) at the cost of the army — no shame in living</td></tr>
     <tr><td>In combat</td><td>tap a green hex to move, an enemy to strike/shoot · Wait (W) · Defend (D) · ✨ Cast once per round · Auto resolves for you</td></tr>
     <tr><td>Heroes</td><td>battles and chests grant XP — each level: +1 stat and a skill choice; tap your hero to manage army (split/merge/swap), gear, and spells</td></tr>
     <tr><td>Spells</td><td>mana = Knowledge ×10, trickles back daily; visit a Mage Guild town to learn its four spells (and refill overnight)</td></tr>
@@ -3239,7 +3324,7 @@ function readAutosave(){
 }
 function serialize(){
   return JSON.stringify({
-    v:2, seed:G.seed, day:G.day, cur:G.cur, nextId:G.nextId,
+    v:2, seed:G.seed, diff:G.diff, day:G.day, cur:G.cur, nextId:G.nextId,
     doom:G.doom, over:G.over,
     players:G.players, heroes:G.heroes,
     objects:G.objects.filter(o=>!o.dead),
@@ -3337,7 +3422,7 @@ function loadFrom(json){
 
   const prevG=G, prevTerrain=terrainCanvas;
   try{
-    G={ v:1, seed:d.seed>>>0, day:Math.max(1,d.day|0), cur:0, nextId:d.nextId|0,
+    G={ v:1, seed:d.seed>>>0, diff:DIFFS[d.diff]?d.diff:1, day:Math.max(1,d.day|0), cur:0, nextId:d.nextId|0,
       doom:Array.isArray(d.doom)&&d.doom.length===2? d.doom.map(v=>Number.isInteger(v)&&v>=0&&v<=7?v:null):[null,null],
       over:(d.over===0||d.over===1)? d.over:null,
       players:d.players, heroes:d.heroes, objects:d.objects,
@@ -3393,7 +3478,7 @@ const pointers=new Map();
 let dragState=null, pinchState=null, suppressTapUntil=0;
 
 canvas.addEventListener("pointerdown",e=>{
-  canvas.setPointerCapture(e.pointerId);
+  try{ canvas.setPointerCapture(e.pointerId); }catch(err){}
   pointers.set(e.pointerId,{x:e.offsetX,y:e.offsetY,sx:e.offsetX,sy:e.offsetY,moved:false});
   if(pointers.size===2){
     const [a,b]=[...pointers.values()];
@@ -3485,9 +3570,13 @@ function handleTap(sx,sy){
   if(t.x===h.x&&t.y===h.y){ openHeroPanel(h); return; }
   /* hostile-target hint on first tap (never name what the fog still hides) */
   if(!(UI.pending&&UI.pending.x===t.x&&UI.pending.y===t.y)){
-    if(obj&&obj.t==="guard") toast(`${obj.n} ${obj.cre} — tap again to attack.`);
-    else if(tapHero&&G.visible[0][i]) toast(`${tapHero.name} of the ${FACTIONS[tapHero.fac].short} — tap again to attack.`);
-    else if(obj&&obj.t==="town"&&obj.owner!==0&&townDefended(obj)) toast(`${obj.name} is garrisoned — tap again to lay siege.`);
+    const threat=p=>{
+      const r=heroPower(h)/Math.max(1,p);
+      return r>1.5? "an easy fight" : r>0.8? "an even match — be careful" : "⚠ they look far stronger!";
+    };
+    if(obj&&obj.t==="guard") toast(`${obj.n} ${obj.cre} (${threat(stackPower(obj.cid,obj.n))}) — tap again to attack.`);
+    else if(tapHero&&G.visible[0][i]) toast(`${tapHero.name} of the ${FACTIONS[tapHero.fac].short} (${threat(heroPower(tapHero))}) — tap again to attack.`);
+    else if(obj&&obj.t==="town"&&obj.owner!==0&&townDefended(obj)) toast(`${obj.name} is garrisoned (${threat(townDefPower(obj))}) — tap again to lay siege.`);
   }
 
   if(UI.pending&&UI.pending.x===t.x&&UI.pending.y===t.y){
@@ -3571,7 +3660,7 @@ function startGame(seed){
     B=null;
     document.getElementById("battle").classList.remove("show");
   }
-  G=makeGame(seed);
+  G=makeGame(seed,menuDiff);
   renderTerrain(); rebuildOcc(); recomputeVisible();
   const h=G.heroes.find(h=>h.owner===0);
   UI.selected=h?h.id:null; UI.preview=null; UI.pending=null;
@@ -3585,6 +3674,14 @@ function startGame(seed){
   toast("Tap a tile to plot a route; tap again to march.");
 }
 
+let menuDiff=1;
+document.querySelectorAll("#diffRow button").forEach(b=>{
+  b.onclick=()=>{
+    menuDiff=+b.dataset.diff;
+    document.querySelectorAll("#diffRow button").forEach(x=>x.classList.toggle("on",x===b));
+    document.getElementById("diffNote").textContent=DIFFS[menuDiff].note;
+  };
+});
 document.getElementById("btnNew").onclick=()=>{
   const v=document.getElementById("seedInput").value.trim();
   const seed=v? (parseInt(v,10)>>>0)||1 : (Math.floor(Math.random()*1e9)>>>0);
