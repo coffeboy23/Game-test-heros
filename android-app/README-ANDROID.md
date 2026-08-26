@@ -15,7 +15,11 @@ just a copy that you refresh with one command.
 
    ```
    npm install
+   npm run sync
    ```
+
+   (`sync` copies the game into the native project — run it again after any
+   game edit.)
 
 ## Build and run on your phone
 
