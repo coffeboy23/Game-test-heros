@@ -206,7 +206,7 @@
   <button id="btnResume" style="width:220px;display:none">↩ Resume</button>
   <div class="note">Tap a tile to plot a route, tap again to march. Drag to pan · pinch or wheel to zoom.<br>
     Keys: arrows pan · E end turn · H next hero · +/− zoom</div>
-  <div id="phase">Phase 4 build — heroes · spells · artifacts</div>
+  <div id="phase">v1.0 — map · towns · battles · heroes · a living foe</div>
 </div>
 
 <script>
@@ -393,13 +393,13 @@ const BLD=[
   {id:"hall2",nm:"Town Hall",   desc:"Income 1000 gold/day",           cost:{gold:2500},                 req:[]},
   {id:"hall3",nm:"City Hall",   desc:"Income 2000 gold/day",           cost:{gold:5000},                 req:["hall2","market"]},
   {id:"hall4",nm:"Capitol",     desc:"Income 4000 gold/day (one per realm)", cost:{gold:10000},          req:["hall3","castle"], unique:true},
-  {id:"fort",  nm:"Fort",       desc:"Walls in sieges (Phase 3)",      cost:{gold:5000,wood:10,ore:10},  req:[]},
+  {id:"fort",  nm:"Fort",       desc:"Walls defend the town in sieges", cost:{gold:5000,wood:10,ore:10},  req:[]},
   {id:"citadel",nm:"Citadel",   desc:"+50% creature growth, stronger walls", cost:{gold:2500,ore:5},     req:["fort"]},
   {id:"castle",nm:"Castle",     desc:"+100% creature growth, full walls",    cost:{gold:5000,wood:10,ore:10}, req:["citadel"]},
   {id:"tavern",nm:"Tavern",     desc:"Hire heroes (max 4)",            cost:{gold:500,wood:5},           req:[]},
   {id:"market",nm:"Marketplace",desc:"Trade resources; more markets = better rates", cost:{gold:500,wood:5}, req:[]},
   {id:"smith", nm:"Blacksmith", desc:"Enables dwelling upgrades",      cost:{gold:1000,ore:5},           req:[]},
-  {id:"guild", nm:"Mage Guild", desc:"Visiting hero regains all mana daily (spells in Phase 4)", cost:{gold:2000,wood:5,ore:5}, req:[]},
+  {id:"guild", nm:"Mage Guild", desc:"Teaches four spells; visiting heroes wake with full mana", cost:{gold:2000,wood:5,ore:5}, req:[]},
   {id:"d1",nm:null,tier:1,cost:{gold:400,wood:3},              req:[]},
   {id:"d2",nm:null,tier:2,cost:{gold:800,wood:4,ore:2},        req:["d1"]},
   {id:"d3",nm:null,tier:3,cost:{gold:1500,ore:4},              req:["d2"]},
@@ -1149,7 +1149,7 @@ const INTERACTIVE={pile:1,chest:1,art:1,mine:1,town:1,guard:1};
 function makeGame(seed){
   const w=generateWorld(seed);
   return {
-    v:1, seed, day:1, cur:0, nextId:w.nextId,
+    v:1, seed, day:1, cur:0, nextId:w.nextId, doom:[null,null], over:null,
     players:[
       { name:"you", fac:0, gold:10000, wood:20, ore:20, moon:5, ember:5, ai:false },
       { name:"Duskmire", fac:1, gold:10000, wood:20, ore:20, moon:5, ember:5, ai:true },
@@ -1338,11 +1338,9 @@ function interact(hero,obj){
   } else if(obj.t==="town"){
     if(obj.owner!==hero.owner){
       obj.owner=hero.owner; minimapDirty=true;
-      if(hero.owner===0){
-        toast(`⚑ ${obj.name} has fallen to your banner!`,"good");
-        if(G.objects.filter(o=>o.t==="town").every(o=>o.owner===0))
-          toast("Every town in Embervale is yours. (Victory scoring arrives in Phase 5.)","good");
-      } else toast(`⚑ ${obj.name} was seized by the Duskmire Covenant!`,"bad");
+      if(hero.owner===0) toast(`⚑ ${obj.name} has fallen to your banner!`,"good");
+      else toast(`⚑ ${obj.name} was seized by the Duskmire Covenant!`,"bad");
+      checkVictoryMap();
     } else {
       learnAtGuild(hero,obj);
       if(hero.owner===0) openTownPanel(obj);
@@ -1495,10 +1493,14 @@ function effSpd(u){ return Math.max(1,CREATURES[u.cid].spd+effBonus(u,"spd")); }
 const SPREAD=[5,4,6,3,7,2,8,1,9,0,10];
 function startBattle(ctx){
   /* ctx: {title, atkHero, atkStacks, defHero, defStacks, wallLv, onEnd(winSide,B)} */
+  if(ctx.atkOwner===undefined) ctx.atkOwner=ctx.atkHero? ctx.atkHero.owner:2;
+  if(ctx.defOwner===undefined) ctx.defOwner=ctx.defHero? ctx.defHero.owner:2;
+  ctx.silent=!!ctx.silent&&ctx.atkOwner!==0&&ctx.defOwner!==0;   // never silence the player's fights
   B={ units:[], obst:new Set(), walls:new Map(), atkHero:ctx.atkHero||null, defHero:ctx.defHero||null,
       ctx, round:0, queue:[], waitQ:[], active:null, auto:false, fast:false,
       sel:null, reach:new Map(), targets:new Map(), floats:[], logs:[], over:false, hover:null,
       cast:[false,false], targeting:null };
+  if(ctx.silent){ B.auto=true; B.fast=true; }
   const place=(stacks,side,col)=>{
     let r=0;
     stacks.forEach((s,slot)=>{
@@ -1522,11 +1524,13 @@ function startBattle(ctx){
     const x=3+Math.floor(Math.random()*(maxOx-2)), y=Math.floor(Math.random()*BF_H);
     if(hexFree(x,y)&&y!==GATE_ROW){ B.obst.add(hexKey(x,y)); i++; }
   }
-  toastsEl.innerHTML="";                      // stale map toasts would cover the action bar
-  document.getElementById("battle").classList.add("show");
-  document.getElementById("bAuto").classList.remove("on");
-  document.getElementById("btitle").textContent=ctx.title||"Battle";
-  blog(`<b>${ctx.title||"Battle"}</b> — the lines are drawn.`);
+  if(!ctx.silent){
+    toastsEl.innerHTML="";                    // stale map toasts would cover the action bar
+    document.getElementById("battle").classList.add("show");
+    document.getElementById("bAuto").classList.remove("on");
+    document.getElementById("btitle").textContent=ctx.title||"Battle";
+    blog(`<b>${ctx.title||"Battle"}</b> — the lines are drawn.`);
+  }
   beginRound();
   pump();
 }
@@ -1580,8 +1584,9 @@ function pickNext(){
   return null;
 }
 function controlledByHuman(u){
-  const h=heroFor(u.side);
-  return !!h && h.owner===0 && !B.auto;
+  /* the human plays any side they OWN — their hero's army, or their town garrison */
+  const own = u.side===0? B.ctx.atkOwner : B.ctx.defOwner;
+  return own===0 && !B.auto;
 }
 /* pump: advance AI turns until a human decision (or battle end) */
 let pumpTimer=null;
@@ -1870,7 +1875,7 @@ function expDmg(att,def,melee){
 }
 function aiActUnit(u){
   aiMaybeCast(u.side);
-  if(B.over) return;
+  if(!B||B.over) return;                             // the cast may have decided (and torn down) the battle
   if(!u.alive){ B.active=null; return; }            // the hero's own spell backfired on it
   const foes=B.units.filter(v=>v.alive&&v.side!==u.side);
   if(!foes.length){ finishAction(u,false); return; }
@@ -1930,11 +1935,21 @@ function endBattle(winSide){
   }
   const result={winSide,xp,lostA:lost(0),lostD:lost(1),
     defSurvivors:surv(1).filter(u=>u.slot>=0).map(u=>({slot:u.slot,c:u.cid,n:u.n}))};
+  if(B.ctx.silent){
+    /* AI-vs-AI or AI-vs-neutral: apply the outcome without any UI */
+    if(winSide===0&&B.atkHero&&xp>0) gainXp(B.atkHero,xp);
+    const ctx=B.ctx;
+    B=null;
+    ctx.onEnd(winSide,result);
+    recomputeVisible(); refreshUI();
+    return;
+  }
   B.ctx.onEnd(winSide,result);
   const rows=(list,label)=>`<tr><td>${label}</td><td>${list.length?list.map(e=>`${e.k} ${e.name}`).join(", "):"none"}</td></tr>`;
-  showModal(`<h2>${winSide===0?"⚔ VICTORY":"☠ DEFEAT"}</h2>
-    <table>${rows(result.lostA,"Your losses")}${rows(result.lostD,"Enemy losses")}
-    ${xp?`<tr><td>Experience</td><td>+${xp} XP</td></tr>`:""}</table>
+  const humanWon=(winSide===0?B.ctx.atkOwner:B.ctx.defOwner)===0;
+  showModal(`<h2>${humanWon?"⚔ VICTORY":"☠ DEFEAT"}</h2>
+    <table>${rows(result.lostA,B.ctx.atkOwner===0?"Your losses":"Attacker losses")}${rows(result.lostD,B.ctx.defOwner===0?"Your losses":"Defender losses")}
+    ${xp&&B.ctx.atkOwner===0&&winSide===0?`<tr><td>Experience</td><td>+${xp} XP</td></tr>`:""}</table>
     <div class="mrow"><button id="bDone" class="primary">Continue</button></div>`,true);
   if(winSide===0&&B.atkHero&&xp>0) gainXp(B.atkHero,xp);   // level-up dialogs follow the result
   document.getElementById("bDone").onclick=()=>{
@@ -1942,6 +1957,8 @@ function endBattle(winSide){
     document.getElementById("battle").classList.remove("show");
     B=null;
     recomputeVisible(); refreshUI();
+    checkVictoryMap();
+    if(G&&G.cur===1) setTimeout(aiContinue,120);   // the Covenant resumes its turn
   };
 }
 
@@ -2183,29 +2200,41 @@ function hostileInfoAt(hero,x,y){
 }
 function heroArmyStacks(h){ return h.army.map(s=>s?{c:s.c,n:s.n}:null); }
 function launchBattleFromMap(hero,hi){
-  if(!hero.army.some(Boolean)){ toast(`${hero.name} has no troops to fight with!`,"bad"); return; }
+  if(!hero.army.some(Boolean)){
+    if(hero.owner===0) toast(`${hero.name} has no troops to fight with!`,"bad");
+    return;
+  }
   UI.preview=null; UI.pending=null;
+  const mine=hero.owner===0;
   if(hi.type==="guard"){
     const obj=hi.obj;
     startBattle({ title:`${hero.name} vs ${obj.cre}`,
       atkHero:hero, atkStacks:heroArmyStacks(hero),
       defHero:null, defStacks:splitGuardStacks(obj), wallLv:0,
+      atkOwner:hero.owner, defOwner:2, silent:!mine,
       onEnd:(win,res)=>{
         const left=res.defSurvivors.reduce((s,u)=>s+u.n,0);
-        if(win===0){ killObject(obj); toast(`The ${obj.cre} are slain. +${res.xp} XP`,"good"); }
+        if(win===0){ killObject(obj); if(mine) toast(`The ${obj.cre} are slain. +${res.xp} XP`,"good"); }
         else { obj.n=Math.max(1,left); killHero(hero); }
+        checkVictoryMap();
       }});
   } else if(hi.type==="hero"){
     const foe=hi.foe;
     startBattle({ title:`${hero.name} vs ${foe.name}`,
       atkHero:hero, atkStacks:heroArmyStacks(hero),
       defHero:foe, defStacks:heroArmyStacks(foe), wallLv:0,
+      atkOwner:hero.owner, defOwner:foe.owner, silent:hero.owner!==0&&foe.owner!==0,
       onEnd:(win,res)=>{
-        if(win===0){ killHero(foe); toast(`${foe.name} is defeated! +${res.xp} XP`,"good"); }
-        else {
+        if(win===0){
+          killHero(foe);
+          toast(mine? `${foe.name} is defeated! +${res.xp} XP`
+                    : `${foe.name} has fallen to ${hero.name} of the Covenant!`, mine?"good":"bad");
+        } else {
           for(const u of res.defSurvivors) foe.army[u.slot]= u.n>0? {c:u.c,n:u.n}:null;
           killHero(hero);
+          if(!mine) toast(`${foe.name} repels ${hero.name}!`,"good");
         }
+        checkVictoryMap();
       }});
   } else if(hi.type==="siege"){
     const t=hi.obj;
@@ -2213,19 +2242,21 @@ function launchBattleFromMap(hero,hi){
     startBattle({ title:`Siege of ${t.name}`,
       atkHero:hero, atkStacks:heroArmyStacks(hero),
       defHero:null, defStacks:t.garr.map(s=>s?{c:s.c,n:s.n}:null), wallLv,
+      atkOwner:hero.owner, defOwner:t.owner, silent:hero.owner!==0&&t.owner!==0,
       onEnd:(win,res)=>{
         if(win===0){
           t.garr=[null,null,null,null,null,null,null];
           t.owner=hero.owner; minimapDirty=true;
-          toast(`⚑ ${t.name} has fallen to your banner! +${res.xp} XP`,"good");
-          if(G.objects.filter(o=>o.t==="town"&&!o.dead).every(o=>o.owner===0))
-            toast("Every town in Embervale is yours. (Victory scoring arrives in Phase 5.)","good");
+          toast(mine? `⚑ ${t.name} has fallen to your banner! +${res.xp} XP`
+                    : `⚑ ${t.name} has been stormed by the Duskmire Covenant!`, mine?"good":"bad");
         } else {
           const ng=[null,null,null,null,null,null,null];
           for(const u of res.defSurvivors) if(u.n>0) ng[u.slot]={c:u.c,n:u.n};
           t.garr=ng;
           killHero(hero);
+          if(!mine) toast(`The garrison of ${t.name} holds!`,"good");
         }
+        checkVictoryMap();
       }});
   }
 }
@@ -2239,10 +2270,151 @@ function killHero(h){
       const next=G.heroes.find(x=>x.owner===0);
       UI.selected=next?next.id:null;
     }
-    if(!G.heroes.some(x=>x.owner===0)&&!playerTowns(0).length)
-      toast("You have no heroes and no towns… (defeat rules arrive in Phase 5)","bad");
   }
   recomputeVisible();
+  checkVictoryMap();
+}
+
+/* =============================================================================
+   AI OPPONENT + WIN/LOSE (Phase 5)
+   The Covenant plays with the same functions the player uses: doBuild,
+   recruitInto, hireHero, computePreview/executeMove, launchBattleFromMap.
+   It only acts on tiles its own fog has revealed.
+   ========================================================================== */
+function stackPower(c,n){ const cre=CREATURES[c]; return n*(cre.hp+(cre.dmin+cre.dmax)*1.5+cre.atk+cre.def); }
+function armyPowerStacks(stacks){ return stacks.reduce((s,x)=>s+(x?stackPower(x.c,x.n):0),0); }
+function heroPower(h){ return armyPowerStacks(h.army)*(1+0.03*(effStat(h,"atk")+effStat(h,"def"))); }
+function townDefPower(t){ return armyPowerStacks(t.garr)*(1+0.15*(t.bld.castle?3:t.bld.citadel?2:t.bld.fort?1:0)); }
+function townCount(p){ return G.objects.filter(o=>o.t==="town"&&!o.dead&&o.owner===p).length; }
+function heroCount(p){ return G.heroes.filter(h=>h.owner===p).length; }
+
+const AI_BUILD_ORDER=["hall2","d1","d2","market","d3","smith","hall3","citadel","d4","guild",
+  "fort","tavern","d5","castle","d6","u2","u3","hall4","d7","u1","u4","u5","u6","u7"];
+function aiEconomy(){
+  for(const t of playerTowns(1)){
+    for(const id of AI_BUILD_ORDER){
+      const cb=canBuild(t,id);
+      if(cb.ok){ doBuild(t,id); break; }
+    }
+    if(heroCount(1)<2&&t.bld.tavern&&t.tav&&G.players[1].gold>=3200) hireHero(t);
+    for(let tier=7;tier>=1;tier--){
+      const m=maxRecruit(t,tier);
+      if(m>0) recruitInto(t,tier,m);
+    }
+    const vh=visitingHero(t);
+    if(vh&&vh.owner===1) aiTakeGarrison(t,vh);
+  }
+}
+function aiTakeGarrison(t,h){
+  for(let i=0;i<7;i++){
+    const s=t.garr[i]; if(!s) continue;
+    const same=h.army.find(x=>x&&x.c===s.c);
+    if(same){ same.n+=s.n; t.garr[i]=null; }
+    else { const e=h.army.findIndex(x=>!x); if(e>=0){ h.army[e]=s; t.garr[i]=null; } }
+  }
+}
+function aiFrontier(h){
+  const exp=G.explored[1];
+  let best=null,bd=1e9;
+  for(let y=1;y<MAPH-1;y++) for(let x=1;x<MAPW-1;x++){
+    if(!exp[idx(x,y)]||!passableTransit(x,y)) continue;
+    let edge=false;
+    for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]])
+      if(!exp[idx(x+dx,y+dy)]){ edge=true; break; }
+    if(!edge) continue;
+    const d=Math.abs(x-h.x)+Math.abs(y-h.y);
+    if(d>0&&d<bd){ bd=d; best={x,y}; }
+  }
+  return best;
+}
+function aiPickAction(h){
+  const myP=heroPower(h), exp=G.explored[1];
+  const cands=[];
+  const consider=(x,y,val)=>{
+    if(!exp[idx(x,y)]) return;
+    cands.push({x,y,val,d:Math.abs(x-h.x)+Math.abs(y-h.y)});
+  };
+  for(const o of G.objects){
+    if(o.dead) continue;
+    if(o.t==="pile") consider(o.x,o.y,500);
+    else if(o.t==="chest") consider(o.x,o.y,800);
+    else if(o.t==="art") consider(o.x,o.y,900);
+    else if(o.t==="mine"&&o.owner!==1) consider(o.x,o.y,1300);
+    else if(o.t==="guard"){ if(myP>1.4*stackPower(o.cid,o.n)) consider(o.x,o.y,700); }
+    else if(o.t==="town"&&o.owner!==1){
+      const dp=townDefPower(o)
+        +G.heroes.filter(x=>x.owner!==1&&x.x===o.x&&x.y===o.y).reduce((s,x)=>s+heroPower(x),0);
+      if(dp<=0||myP>(o.owner===0?1.6:1.3)*dp) consider(o.x,o.y,o.owner===0?2600:2200);
+    }
+  }
+  for(const eh of G.heroes)
+    if(eh.owner===0&&myP>1.6*heroPower(eh)) consider(eh.x,eh.y,2000);
+  cands.sort((a,b)=>(b.val/(b.d+3))-(a.val/(a.d+3)));
+  for(const c of cands.slice(0,6)){
+    const pv=computePreview(h,c.x,c.y);
+    if(pv) return pv;
+  }
+  const fr=aiFrontier(h);
+  if(fr){ const pv=computePreview(h,fr.x,fr.y); if(pv) return pv; }
+  return null;
+}
+let aiState=null;
+let aiEnabled=true;          // test hook (EV.setAI): a passive Covenant still gets its new day
+function aiTakeTurn(){
+  aiTimer=null;
+  if(!G||G.cur!==1) return;
+  if(!aiEnabled){ newDay(); return; }
+  try{ aiEconomy(); }catch(e){ console.warn("AI economy:",e); }
+  aiState={ idx:0, actions:0 };
+  aiContinue();
+}
+function aiContinue(){
+  if(!G||G.cur!==1||B) return;
+  try{
+    let guard=0;
+    while(aiState&&guard++<60){
+      if(G.over!=null){ aiState=null; break; }
+      const heroes=G.heroes.filter(h=>h.owner===1);
+      if(aiState.idx>=heroes.length||aiState.actions>=14){ aiState=null; break; }
+      const h=heroes[aiState.idx];
+      if(h.mp<65){ aiState.idx++; continue; }
+      let pv=null;
+      try{ pv=aiPickAction(h); }catch(e){ console.warn("AI plan:",e); }
+      if(!pv){ aiState.idx++; continue; }
+      aiState.actions++;
+      const bx=h.x, by=h.y, bmp=h.mp;
+      executeMove(h,pv,true);
+      if(B) return;                       // interactive battle: resumed from its Continue button
+      if(h.x===bx&&h.y===by&&h.mp>=bmp) aiState.idx++;   // no progress: next hero
+    }
+  }catch(e){ console.warn("AI turn:",e); }
+  aiState=null;
+  if(G&&G.cur===1&&!B) newDay();          // never stall: the day always arrives
+}
+/* ---- win / lose ---- */
+function checkVictoryMap(){
+  if(!G||G.over!=null) return;
+  for(const p of [0,1])
+    if(townCount(p)===0&&heroCount(p)===0){ gameOver(1-p); return; }
+}
+function gameOver(winner){
+  if(!G||G.over!=null) return;
+  G.over=winner;
+  const won=winner===0, d=dateParts();
+  showModal(`<h2 style="color:${won?"var(--gold2)":"var(--red)"}">${won?"👑 VICTORY!":"☠ DEFEAT"}</h2>
+    <p>${won? "The Duskmire Covenant is broken. All of Embervale bows to your banner, commander."
+            : "Your last banner is cast down. The Covenant's shadow falls over Embervale."}</p>
+    <table>
+      <tr><td>Campaign length</td><td>Month ${d.month}, Week ${d.week}, Day ${d.day} (day ${G.day})</td></tr>
+      <tr><td>World seed</td><td>${G.seed}</td></tr>
+    </table>
+    <div class="mrow"><button id="goNew" class="primary">⚔ New Campaign</button><button id="goStay">Keep playing</button></div>`,true);
+  document.getElementById("goNew").onclick=()=>{
+    closeModal();
+    document.getElementById("menu").classList.remove("hide");
+    document.getElementById("btnResume").style.display="block";
+  };
+  document.getElementById("goStay").onclick=closeModal;
 }
 
 /* =============================================================================
@@ -2393,15 +2565,25 @@ function endTurn(){
   if(modalBack.classList.contains("show")) return;   // never end the turn under a dialog
   UI.preview=null; UI.pending=null;
   G.cur=1; refreshUI();
-  /* Phase 1 AI: the Covenant holds its ground and banks its income.
-     Exploration, recruiting and raids arrive in Phase 5. */
-  aiTimer=setTimeout(newDay, 300);
+  aiTimer=setTimeout(aiTakeTurn, 250);   // the Covenant takes its turn, then the new day dawns
 }
 function newDay(){
   aiTimer=null;
   if(!G||G.cur!==1) return;   // stale timer after a new game / load
   G.day++; G.cur=0;
   applyIncome();
+  /* homeless countdown: 7 days to reclaim a town, or the realm falls */
+  if(G.over==null){
+    for(const p of [0,1]){
+      if(townCount(p)===0){
+        G.doom[p]=G.doom[p]==null?7:G.doom[p]-1;
+        if(G.doom[p]<=0){ gameOver(1-p); break; }
+        if(p===0) toast(`⚠ You hold no towns! ${G.doom[p]} day${G.doom[p]>1?"s":""} to reclaim one.`,"bad");
+        else toast(`Duskmire holds no towns — ${G.doom[p]} day${G.doom[p]>1?"s":""} until their collapse.`,"good");
+      } else G.doom[p]=null;
+    }
+    checkVictoryMap();
+  }
   const d=dateParts();
   for(const t of G.objects){
     if(t.t!=="town"||t.dead) continue;
@@ -2763,7 +2945,7 @@ function slotClick(t,arr,i){
 }
 function showHelp(){
   if(B){ toast("Finish the battle first."); return; }
-  showModal(`<h2>How to play — Phase 4</h2>
+  showModal(`<h2>How to play</h2>
     <table>
     <tr><td>Move</td><td>tap/click a tile → route preview, tap again → march</td></tr>
     <tr><td>Pan / zoom</td><td>drag · pinch, wheel, or +/−</td></tr>
@@ -2779,7 +2961,8 @@ function showHelp(){
     <tr><td>Heroes</td><td>battles and chests grant XP — each level: +1 stat and a skill choice; tap your hero to manage army (split/merge/swap), gear, and spells</td></tr>
     <tr><td>Spells</td><td>mana = Knowledge ×10, trickles back daily; visit a Mage Guild town to learn its four spells (and refill overnight)</td></tr>
     <tr><td>Sieges</td><td>walls block the ground — batter them, fly over, or push the gate row</td></tr>
-    <tr><td>End turn</td><td>⌛ button or E — restores movement, pays income</td></tr>
+    <tr><td>End turn</td><td>⌛ button or E — the Covenant moves, then a new day dawns</td></tr>
+    <tr><td>Winning</td><td>eliminate Duskmire: take every town they hold — a realm with no towns collapses after 7 days; no towns AND no heroes ends it at once (same rules apply to you!)</td></tr>
     </table>
     <div class="mrow"><button onclick="closeModal()">Close</button></div>`);
 }
@@ -2790,6 +2973,7 @@ function showHelp(){
 function serialize(){
   return JSON.stringify({
     v:2, seed:G.seed, day:G.day, cur:G.cur, nextId:G.nextId,
+    doom:G.doom, over:G.over,
     players:G.players, heroes:G.heroes,
     objects:G.objects.filter(o=>!o.dead),
     terr:Array.from(G.terr),
@@ -2887,13 +3071,15 @@ function loadFrom(json){
   const prevG=G, prevTerrain=terrainCanvas;
   try{
     G={ v:1, seed:d.seed>>>0, day:Math.max(1,d.day|0), cur:0, nextId:d.nextId|0,
+      doom:Array.isArray(d.doom)&&d.doom.length===2? d.doom.map(v=>Number.isInteger(v)&&v>=0&&v<=7?v:null):[null,null],
+      over:(d.over===0||d.over===1)? d.over:null,
       players:d.players, heroes:d.heroes, objects:d.objects,
       terr:Uint8Array.from(d.terr),
       explored:[Uint8Array.from(d.explored[0]),Uint8Array.from(d.explored[1])],
       visible:[new Uint8Array(MAPW*MAPH),new Uint8Array(MAPW*MAPH)],
     };
     UI.selected=null; UI.preview=null; UI.pending=null; anim=null;
-    lvlQueue.length=0;
+    lvlQueue.length=0; aiState=null;
     if(aiTimer){ clearTimeout(aiTimer); aiTimer=null; }
     renderTerrain(); rebuildOcc(); recomputeVisible();
     const h=G.heroes.find(h=>h.owner===0);
@@ -3111,6 +3297,7 @@ function cycleHero(){
 function startGame(seed){
   anim=null;
   lvlQueue.length=0;                  // no stale level-ups from the previous game
+  aiState=null;
   if(aiTimer){ clearTimeout(aiTimer); aiTimer=null; }
   if(B){                              // tear down any battle from the previous game
     if(pumpTimer){ clearTimeout(pumpTimer); pumpTimer=null; }
@@ -3169,6 +3356,12 @@ window.EV={
     return executeMove(h,pv,true); },
   objectAt,heroAt,recomputeVisible,
   ui:UI,
+  /* AI + win/lose (Phase 5) */
+  aiTakeTurn, aiPickAction, aiEconomy, heroPower, townDefPower, stackPower,
+  townCount, heroCount, checkVictoryMap,
+  setAI:on=>{ aiEnabled=!!on; },
+  get over(){ return G?G.over:null; },
+  get doom(){ return G?G.doom:null; },
   get cam(){ return cam; },
   tileToScreen, centerOn,
   /* town ops (the Phase 5 AI will drive these same functions) */
