@@ -1431,7 +1431,10 @@ function computePreview(hero,tx,ty){
 const STEP_MS=130;
 function executeMove(hero,preview,instant){
   const steps=preview.steps.filter(s=>s.day===1);
-  if(!steps.length){ toast("Not enough movement left today.","bad"); return false; }
+  if(!steps.length){
+    if(hero.owner===0) toast("Not enough movement left today.","bad");
+    return false;
+  }
   UI.preview=null; UI.pending=null;
   anim={ hero, steps, i:0, px:hero.x*TILE, py:hero.y*TILE, t:0, last:performance.now(), instant:!!instant };
   if(instant) skipAnim();
@@ -2640,10 +2643,16 @@ function checkVictoryMap(){
   for(const p of [0,1])
     if(townCount(p)===0&&heroCount(p)===0){ gameOver(1-p); return; }
 }
+let overModalPending=false;
 function gameOver(winner){
   if(!G||G.over!=null) return;
   G.over=winner;
-  const won=winner===0, d=dateParts();
+  if(B){ overModalPending=true; return; }   // battle result (and level-ups) present first
+  presentGameOverModal();
+}
+function presentGameOverModal(){
+  if(!G||G.over==null) return;
+  const won=G.over===0, d=dateParts();
   showModal(`<h2 style="color:${won?"var(--gold2)":"var(--red)"}">${won?"👑 VICTORY!":"☠ DEFEAT"}</h2>
     <p>${won? "The Duskmire Covenant is broken. All of Embervale bows to your banner, commander."
             : "Your last banner is cast down. The Covenant's shadow falls over Embervale."}</p>
@@ -2882,6 +2891,7 @@ function closeModal(){
   modalBack.classList.remove("show"); modalLocked=false; townSel=null;
   document.getElementById("app").inert=false;
   if(lvlQueue.length) presentNextLevelUp();       // queued level-ups surface next
+  else if(overModalPending){ overModalPending=false; presentGameOverModal(); }
 }
 modalBack.addEventListener("pointerdown",e=>{ if(e.target===modalBack&&!modalLocked) closeModal(); });
 
@@ -3336,7 +3346,7 @@ function loadFrom(json){
       visible:[new Uint8Array(MAPW*MAPH),new Uint8Array(MAPW*MAPH)],
     };
     UI.selected=null; UI.preview=null; UI.pending=null; anim=null;
-    lvlQueue.length=0; aiState=null;
+    lvlQueue.length=0; aiState=null; overModalPending=false;
     if(aiTimer){ clearTimeout(aiTimer); aiTimer=null; }
     renderTerrain(); rebuildOcc(); recomputeVisible();
     const h=G.heroes.find(h=>h.owner===0);
@@ -3554,7 +3564,7 @@ function cycleHero(){
 function startGame(seed){
   anim=null;
   lvlQueue.length=0;                  // no stale level-ups from the previous game
-  aiState=null;
+  aiState=null; overModalPending=false;
   if(aiTimer){ clearTimeout(aiTimer); aiTimer=null; }
   if(B){                              // tear down any battle from the previous game
     if(pumpTimer){ clearTimeout(pumpTimer); pumpTimer=null; }
