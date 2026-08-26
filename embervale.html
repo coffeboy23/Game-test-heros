@@ -798,6 +798,27 @@ function drawMine(sub){
   return c;
 }
 
+/* hero crest portrait: faction shield with the hero's initial */
+const CREST_CACHE={};
+function heroCrest(h){
+  const key=h.fac+"|"+h.name[0];
+  if(!CREST_CACHE[key]){
+    const c=mkCanvas(20,20), g=c.getContext("2d");
+    const F=FACTIONS[h.fac];
+    g.fillStyle="#15100c";
+    g.beginPath(); g.moveTo(2,1); g.lineTo(18,1); g.lineTo(18,11); g.lineTo(10,19); g.lineTo(2,11); g.closePath(); g.fill();
+    g.fillStyle=F.color;
+    g.beginPath(); g.moveTo(3,2); g.lineTo(17,2); g.lineTo(17,10.5); g.lineTo(10,17.5); g.lineTo(3,10.5); g.closePath(); g.fill();
+    g.fillStyle=F.color2; g.fillRect(3,2,14,3);
+    g.fillStyle="#f2efe6"; g.font="bold 10px monospace"; g.textAlign="center";
+    g.fillText(h.name[0],10,13.5);
+    CREST_CACHE[key]=c;
+  }
+  const copy=mkCanvas(20,20);
+  copy.getContext("2d").drawImage(CREST_CACHE[key],0,0);
+  return copy;
+}
+
 /* resource icons for the top bar */
 function resIcon(kind){
   const c=mkCanvas(16,16), g=c.getContext("2d");
@@ -811,31 +832,148 @@ function resIcon(kind){
 }
 
 /* creature tier glyphs: shield / arrow / wing / sword / staff / lance / flame */
-const CRE_ARCH=[
- ["............","..xxxxxxxx..","..xXXXXXXx..","..xXXooXXx..","..xXXooXXx..","..xXXXXXXx..","...xXXXXx...","...xXXXXx...","....xXXx....",".....xx.....","............","............"],
- ["............",".........x..","........xX..",".......xXX..","..o...xXx...","..xo.xXx....","..xXoXx.....","..xXXo......","..xxxxo.....","............","............","............"],
- ["............","..x......x..",".xXx....xXx.",".xXXx..xXXx.","xXXXXxxXXXXx","xXXoXXXXoXXx",".xx.xXXx.xx.",".....xx.....","............","............","............","............"],
- ["............",".....xx.....","....xXXx....","....xXXx....","....xXXx....","....xXXx....","..xxxXXxxx..","..xooXXoox..","....xXXx....","....xXXx....",".....xx.....","............"],
- ["............","....xxx.....","...xoOox....","...xOOOx....","....xox.....",".....Xx.....",".....Xx.....",".....Xx.....",".....Xx.....",".....Xx.....","....xXXx....","............"],
- ["............","........xx..",".......xXXx.","......xXXx..","..o..xXXx...","..ooxXXx....","..ooXXx.....","..xXXx......",".xXXx.......",".xxx........","............","............"],
- ["............","....x..x....","...xXxxXx...","..xXXXXXXx..","..xXoXXoXx..","..xXXXXXXx..","...xXXXXx...","..xXXXXXXx..",".xXx.XX.xXx.","....xXXx....",".....xx.....","............"],
+/* ---- per-creature pixel bodies (16x16, facing right) ---------------------- */
+const CRE_BODY={
+shield:[
+"................","....kkk.........","...kssk.........","...ksesk........","....kk..kkkk....",
+"..kaaakkaccak...",".kbkaaakacaak...",".kbkaaakaeaak...",".kbkaaakacaak...",".kbkaaakaccak...",
+".kkkaaakkkkk....","...kbbk...w.....","...kbkbk.kwk....","..kkb.kbk.w.....","..kkk..kkk......","................"],
+archer:[
+"................","....kkk....k....","...kssk...kmk...","...ksesk..km....","....kk...kmk....",
+"...kcak.kmk.....","..kcaakkm.......","..kcaakwwwwk....","..kcaakkm.......","..kcak..kmk.....",
+"...kbk...kmk....","...kbkb...km....","..kb.kbk...k....","..kk..kk........","................","................"],
+hawk:[
+"................","..k.........kk..",".kWk.......kssk.",".kWWk......ksesk","..kWWk..kkkkskk.",
+"..kWWWkkaaaassk.","...kWWaaaaaask..","....kaaaaaaak...","...kWWaaaaak....","..kWWkkaaak.....",
+".kWk...kaak.....","........ktktk...","................","................","................","................"],
+templar:[
+"......c.........",".....kck........","....kaaak..km...","....kaeak..kmk..","....kaaak..km...",
+"...kkaaakk.km...","..kaaaaaakkkm...",".kckaaaaak.km...",".kckaaaaakkkk...",".kckaaaaak......",
+".kkkaaaak.......","...kaaak........","...kbkbk........","..kbk.kbk.......","..kk...kk.......","................"],
+cleric:[
+".........kfk....","....kkk..kfk....","...kssk...w.....","...ksesk..w.....","....kk....w.....",
+"...krrk...w.....","..krrrrk..w.....",".krrrrrrk.w.....",".krcrrcrkkw.....",".krrrrrrk.w.....",
+".krrrrrrk.......",".krrrrrrk.......",".krrrrrrk.......",".kkkkkkkk.......","................","................"],
+lancer:[
+"................","...kkk.....km...","..kssk....km....","..ksesk..km.....","...kkk..km......",
+"..kcak.km.......",".kcaaakm........",".kcaakkkkkk.....","..kkhhhhhhkk....",".khhhhhhhhhhk...",
+".khkhhhhhkhhk...",".khk.khhk.khk...","..k...kk...k....","..kk...k...kk...","................","................"],
+seraph:[
+"....k...k.......","...kWk.kWk......","..kWWkkkWWk.....","..kWWksskWWk....",".kWWkksesWWk....",
+".kWWkaaakWWk.km.",".kWkaaaaakWkkm..","..kkaaaaakkkm...","...kaaaaakkm....","...kcaaack......",
+"...kcaaack......","....kaaak.......","....kbkbk.......","...kk...kk......","................","................"],
+thrall:[
+"................","................",".....kkk........","....khhhk..w....","...khsesk..w....",
+"..khhskk..kwk...",".khhhhhk..kwk...",".khshhhhk.kw....","khh.khhhkkw.....","kh..khhhhk......",
+".k..khhhk.......","....khkhk.......","...kh..khk......","...kk...kk......","................","................"],
+crawler:[
+"................","................","...k...k.k...k..","..kak.kaak.kak..","..ka.kaaaak.ak..",
+".kakkaaaaaakkak.",".ka.kaeaaeak.ak.",".k..kaaaaaak..k.","....kaaaaak.....","...kakkkkak.....",
+"..kak....kak....",".kk........kk...","................","................","................","................"],
+wing:[
+"................",".k..........k...",".kWk........kWk.",".kWWk..kk..kWWk.",".kWWWkkssskWWWk.",
+"..kWWWksesWWWk..","..kWWWWsssWWWk..","...kWWksskWWk...","....kkkssk.k....","......kssk......",
+"......kstk......",".....ktk.tk.....","................","................","................","................"],
+weaver:[
+"................",".....kkk...kfk..","....khhhk..kfk..","....ksesk...w...",".....kkk...w....",
+"....krrk..w.....","...krrrrkw......","..krrrrrrk......","..krcrrcrk......","..krrrrrrk......",
+"..krrrrrrk......","..krrrrrrk......","..krrrrrrk......","..kkkkkkkk......","................","................"],
+bknight:[
+"................","....kkk....mm...","...kaaak..kmmk..","...kaeak..kmk...","....kkk....w....",
+"...kbabk...w....","..kbaaabk..w....",".kckaaakk.kw....",".kckaaaakkw.....",".kckaaaak.......",
+"..kkaaak........","...kbbbk........","...kbkbk........","..kbk.kbk.......","..kk...kk.......","................"],
+maw:[
+"................","................","...kk......kk...","..khhk....khhk..","..khhhkkkkhhhk..",
+".khhhhhhhhhhhk..",".khehhhhhhhehk..",".khhhhhhhhhhhk..","..kthththththk..",".khtktktktkthk..",
+".khhhhhhhhhhk...","..khhk...khhk...","..ktk.....ktk...","................","................","................"],
+wyrm:[
+"......kk........",".....kaak.......","....kaeak.......","....kaakk.......",".....kaak..kWk..",
+".....kaakkkWWk..","....kaaaaWWWWk..","...kaaaaaWWk....","..kaaaaaaak.....",".kfkaaaaaak.....",
+".kfkaaaaaaak....","..k.kaak.kaak...","....ktk...ktk...","....kaaakk......",".....kkkaak.....",".......kkk......"],
+wight:[
+"................",".....kkk........","....krrrk.......","...krrrrrk......","...krkekrk......",
+"...krrrrrk......","..krrrrrrrk.....","..krrrrrrrk.....",".krrrrrrrrrk....",".krrkrrrkrrk....",
+".krr.rrr.rrk....","..k..rrr..k.....",".....krk........","......k.........","................","................"],
+serpent:[
+"................","......kkk.......",".....kaaek......",".....kaatk......","....kaakk.......",
+"....kaak........","...kaak..kkk....","...kaak.kaaak...","...kaakkaakaak..","....kaaaak.kak..",
+".....kkkk..kak..","..........kak...",".......kkkak....","......kaaak.....",".......kkk......","................"],
+golem:[
+"................","....kkkkkk......","...kaaaaaak.....","...kaeaaeak.....","...kaaaaaak.....",
+"..kkaaaaaakk....",".kaakaaaakaak...",".kaakaaaakaak...",".kaakaaaakaak...",".kkkaaaaaakkk...",
+"...kaaaaaak.....","...kaakkaak.....","...kaak.kaak....","..kkaak.kaakk...","................","................"],
+harpy:[
+"................",".k.........k....",".kWk..kkk.kWk...",".kWWkkhhhkWWk...","..kWWkseskWWk...",
+"..kWWkhskWWk....","...kWksskWk.....","....kkssk.......",".....ksssk......",".....kssk.......",
+"....ktkkt.......","................","................","................","................","................"],
+bat:[
+"................","................","..kk.....kk.....",".kWWk.k.kWWk....",".kWWWkskWWWk....",
+"..kWWsesWWk.....","...kWsssWk......","....ksstk.......","....k.k.........",".........kk..kk.",
+"........kWWkkWWk",".........kWseWk.","..........ksk...","................","................","................"],
+sprite:[
+"................","......kf........",".....kffk.......","....kffffk......","....kfefefk.....",
+"...kffffffk.....","...kfsffsfk.....","....kffffk......",".....kffk.......","....kf..fk......",
+"....k....k......","................","................","................","................","................"],
+wolf:[
+"................","................","................","............kk..","...........khhk.",
+"..kk......khhek.",".khhk...kkhhhk..",".khhhkkkhhhhtk..",".khhhhhhhhhk....","..khhhhhhhhk....",
+"..khhhhhhhhk....","...khk..khk.....","...khk..khk.....","...kk....kk.....","................","................"],
+};
+/* faction base palettes: k outline, s skin, e eye, a armor, b dark, c accent,
+   m metal, w wood, h hair/fur, W wing, t tooth/claw, r robe, f glow */
+const CRE_PAL=[
+ {k:"#15100c",s:"#e0b98c",e:"#1c2f6b",a:"#c7cbd4",b:"#8f95a3",c:"#3d6ea5",m:"#e8e4da",
+  w:"#7a5636",h:"#caa04a",W:"#e8e4da",t:"#f2efe6",r:"#d9d3c0",f:"#ffd95e"},
+ {k:"#140a12",s:"#9aa06b",e:"#ff5a3c",a:"#5d5260",b:"#3a3140",c:"#a03c32",m:"#b8bcc4",
+  w:"#4a3826",h:"#2a2430",W:"#6b4a66",t:"#e8e4da",r:"#4a3350",f:"#ff8a3c"},
+ {k:"#15100c",s:"#8a8378",e:"#d8c9a8",a:"#6f6a63",b:"#4f4a44",c:"#777777",m:"#9c968c",
+  w:"#5a4126",h:"#5d4a38",W:"#5d5260",t:"#e8e4da",r:"#c7c3b6",f:"#7fd4ff"},
 ];
+/* body + palette identity per creature name (upgrades share a body, shift color) */
+const CRE_LOOK={
+ "Shieldbearer":["shield"],                 "Vanguard Shieldbearer":["shield",{a:"#dfe3ea",c:"#5a8ec9"}],
+ "Longbow Sentry":["archer"],               "Hawkeye Sentry":["archer",{c:"#5a8ec9",m:"#fff3c4"}],
+ "Sunhawk":["hawk",{a:"#caa04a",W:"#e8dcc0",h:"#caa04a"}],
+ "Royal Sunhawk":["hawk",{a:"#e3c25c",W:"#fff3c4",h:"#e3c25c"}],
+ "Sun Templar":["templar"],                 "Radiant Templar":["templar",{a:"#e3dfd2",c:"#e3c25c"}],
+ "Cleric of Dawn":["cleric"],               "High Cleric":["cleric",{r:"#f2eee0",f:"#fff3c4"}],
+ "Lancer Knight":["lancer",{h:"#8a6b46"}],  "Radiant Lancer":["lancer",{h:"#d9d3c0",a:"#e3dfd2"}],
+ "Seraph of the Spire":["seraph",{W:"#f2eee0"}],
+ "Exalted Seraph":["seraph",{W:"#fff3c4",a:"#e3dfd2",c:"#e3c25c"}],
+ "Mire Thrall":["thrall"],                  "Bog Ravener":["thrall",{h:"#4a5a34",e:"#ffd95e"}],
+ "Venom Crawler":["crawler",{a:"#5d7a3a"}], "Death Crawler":["crawler",{a:"#3a5a2c",e:"#9fd45f"}],
+ "Duskwing":["wing"],                       "Bloodwing":["wing",{W:"#8a2f4a",s:"#b8909a"}],
+ "Hex Weaver":["weaver"],                   "Curse Weaver":["weaver",{r:"#5d3a68",f:"#d65fd6"}],
+ "Barrow Knight":["bknight"],               "Wight Knight":["bknight",{a:"#7d8592",e:"#7fd4ff"}],
+ "Shadow Maw":["maw"],                      "Abyssal Maw":["maw",{h:"#1c1622",e:"#d65fd6"}],
+ "Pyre Wyrm":["wyrm",{a:"#8a2f2b",W:"#d65f2a",f:"#ffb35e"}],
+ "Cataclysm Wyrm":["wyrm",{a:"#5d1f2e",W:"#ff8a3c",f:"#ffd95e",e:"#ffd95e"}],
+ "Bramble Wolves":["wolf",{h:"#5d4a38",e:"#ffd95e"}],
+ "Barrow Wights":["wight"],
+ "Mire Serpents":["serpent",{a:"#4a7a4a"}],
+ "Stone Gnashers":["golem"],
+ "Feral Harpies":["harpy"],
+ "Gloom Bats":["bat"],
+ "Ember Sprites":["sprite",{f:"#ff8a3c",s:"#ffd95e",e:"#fff3c4"}],
+};
+const CRE_SPRITE=[];
+function creatureSprite(cid){
+  if(!CRE_SPRITE[cid]){
+    const cre=CREATURES[cid];
+    const look=CRE_LOOK[cre.name]||["shield"];
+    const pal=Object.assign({},CRE_PAL[cre.fac],look[1]||{});
+    CRE_SPRITE[cid]=spriteFromMap(CRE_BODY[look[0]]||CRE_BODY.shield,pal,2);   // 32x32
+  }
+  return CRE_SPRITE[cid];
+}
 const CRE_ICON=[];
 function creatureIcon(cid){
   if(!CRE_ICON[cid]){
     const cre=CREATURES[cid];
-    let c;
-    if(cre.fac===2){                       // neutral packs use the beast silhouette
-      c=mkCanvas(24,24);
-      const g=c.getContext("2d"); g.imageSmoothingEnabled=false;
-      g.drawImage(SPR.wolf,0,3,24,16);
-    } else {
-      const F=FACTIONS[cre.fac];
-      c=spriteFromMap(CRE_ARCH[cre.tier-1],
-        {x:"#15100c",X:F.color2,o:F.color,O:"#f2e3ff"},2);
-      if(cre.up){ const g=c.getContext("2d");
-        g.strokeStyle="#ffd95e"; g.lineWidth=2; g.strokeRect(1,1,c.width-2,c.height-2); }
-    }
+    const c=mkCanvas(24,24), g=c.getContext("2d");
+    g.imageSmoothingEnabled=false;
+    g.drawImage(creatureSprite(cid),0,0,24,24);
+    if(cre.up){ g.strokeStyle="#ffd95e"; g.lineWidth=2; g.strokeRect(1,1,22,22); }
     CRE_ICON[cid]=c;
   }
   const copy=mkCanvas(CRE_ICON[cid].width,CRE_ICON[cid].height);
@@ -902,6 +1040,27 @@ function renderTerrain(){
       }
       g.fillStyle="#6a5636";
       for(let i=0;i<3;i++) g.fillRect(X+((hash2(x+i,y+i,G.seed+47)*28)|0), Y+((hash2(x*2,y+i,G.seed+53)*28)|0), 2,2);
+    }
+  }
+  /* dithered transitions where different terrains meet (skip roads: crisp) */
+  for(let y=0;y<MAPH;y++) for(let x=0;x<MAPW;x++){
+    const t=G.terr[idx(x,y)];
+    if(t===TER.ROAD) continue;
+    for(const [dx,dy] of [[1,0],[0,1]]){
+      const nx=x+dx, ny=y+dy;
+      if(!inMap(nx,ny)) continue;
+      const tn=G.terr[idx(nx,ny)];
+      if(tn===t||tn===TER.ROAD) continue;
+      const shore=(t===TER.WATER||tn===TER.WATER);
+      const cA=shore? "#5d84ad" : TER_BASE[tn], cB=shore? "#5d84ad" : TER_BASE[t];
+      for(let i=0;i<4;i++){
+        const o=((hash2(x*5+i,y*9+i,G.seed+301)*(TILE-4))|0)&~1;
+        g.fillStyle=cA;
+        if(dx) g.fillRect(nx*TILE-4, y*TILE+2+o, 2,2); else g.fillRect(x*TILE+2+o, ny*TILE-4, 2,2);
+        g.fillStyle=cB;
+        if(dx) g.fillRect(nx*TILE+2, y*TILE+2+((hash2(x*9+i,y*5+i,G.seed+307)*(TILE-4))|0&~1), 2,2);
+        else g.fillRect(x*TILE+2+((hash2(x*9+i,y*5+i,G.seed+307)*(TILE-4))|0&~1), ny*TILE+2, 2,2);
+      }
     }
   }
   /* soft edge blend: darken tile borders slightly for a knit look */
@@ -980,6 +1139,16 @@ function draw(time){
   const x0=clamp(Math.floor(cam.x/TILE),0,MAPW-1), y0=clamp(Math.floor(cam.y/TILE),0,MAPH-1);
   const x1=clamp(Math.ceil((cam.x+viewW/cam.z)/TILE),0,MAPW), y1=clamp(Math.ceil((cam.y+viewH/cam.z)/TILE),0,MAPH);
 
+  /* living water: soft glints drifting on visible water tiles */
+  for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){
+    if(G.terr[idx(x,y)]!==TER.WATER||!ex[idx(x,y)]) continue;
+    const ph=hash2(x,y,G.seed+401)*6.28;
+    ctx.globalAlpha=0.18+0.18*Math.sin(time/650+ph);
+    ctx.fillStyle="#8cc3e8";
+    ctx.fillRect(x*TILE+4+((hash2(x,y,402)*20)|0), y*TILE+5+((hash2(y,x,403)*20)|0), 7,2);
+    ctx.globalAlpha=1;
+  }
+
   /* objects (drawn if explored), sorted by y for overlap */
   const drawList=[];
   for(const o of G.objects){
@@ -998,6 +1167,10 @@ function draw(time){
   for(const o of drawList){
     if(!o.t){ drawHero(o,time); continue; }
     const X=o.x*TILE, Y=o.y*TILE;
+    ctx.fillStyle="rgba(0,0,0,0.22)";
+    ctx.beginPath();
+    ctx.ellipse(X+16, Y+29, o.t==="town"?22:11, o.t==="town"?5:3.5, 0,0,7);
+    ctx.fill();
     if(o.t==="town"){
       const spr=SPR.town[o.fac];
       ctx.drawImage(spr, X-16, Y-spr.height+TILE);
@@ -1013,7 +1186,7 @@ function draw(time){
       const bob=Math.sin(time/400+o.x)*2;
       ctx.drawImage(SPR.relic, X+8, Y+6+bob);
     } else if(o.t==="guard"){
-      ctx.drawImage(SPR.wolf, X, Y+8);
+      ctx.drawImage(creatureSprite(o.cid!==undefined?o.cid:0), X+2, Y+4, 28, 28);
       /* little count tag */
       ctx.fillStyle="rgba(10,8,6,0.75)"; ctx.fillRect(X+18,Y+22,13,9);
       ctx.fillStyle="#d8c9a8"; ctx.font="8px monospace"; ctx.fillText(""+o.n, X+20, Y+29.5);
@@ -1498,7 +1671,7 @@ function startBattle(ctx){
   ctx.silent=!!ctx.silent&&ctx.atkOwner!==0&&ctx.defOwner!==0;   // never silence the player's fights
   B={ units:[], obst:new Set(), walls:new Map(), atkHero:ctx.atkHero||null, defHero:ctx.defHero||null,
       ctx, round:0, queue:[], waitQ:[], active:null, auto:false, fast:false,
-      sel:null, reach:new Map(), targets:new Map(), floats:[], logs:[], over:false, hover:null,
+      sel:null, reach:new Map(), targets:new Map(), floats:[], fx:[], logs:[], over:false, hover:null,
       cast:[false,false], targeting:null };
   if(ctx.silent){ B.auto=true; B.fast=true; }
   const place=(stacks,side,col)=>{
@@ -1539,6 +1712,7 @@ function blog(html){
   document.getElementById("blog").innerHTML=B.logs.join("<br>");
 }
 function bfloat(x,y,txt,color){ B.floats.push({x,y,txt,color:color||"#ffd95e",t0:performance.now()}); }
+function bfx(ev){ if(B&&!B.fast){ ev.t0=performance.now(); B.fx.push(ev); } }
 
 /* ---- rounds & turn order ---- */
 function beginRound(){
@@ -1702,7 +1876,12 @@ function strike(att,def,opts){
   const hL=heroFor(att.side);
   const luck=hL&&Math.random()<0.05+0.05*skillRank(hL,"fort");
   const dmg=calcDamage(att,def,Object.assign({},opts,{luck}));
+  if(opts.ranged) bfx({t:"proj",x0:att.x,y0:att.y,x1:def.x,y1:def.y,dur:240});
+  else bfx({t:"lunge",u:att,tx:def.x,ty:def.y,dur:200});
+  bfx({t:"flash",u:def,dur:220});
+  const wasAlive=def.alive;
   const killed=applyDamage(def,dmg);
+  if(wasAlive&&!def.alive) bfx({t:"fade",x:def.x,y:def.y,cid:def.cid,dur:600});
   if(luck) bfloat(att.x,att.y,"LUCK!","#ffd95e");
   bfloat(def.x,def.y,"-"+dmg,"#ff8a6b");
   blog(`${CREATURES[att.cid].name} ${opts.retal?"retaliate for":opts.ranged?"shoot for":"strike for"} <b>${dmg}</b>${killed?` — <b>${killed}</b> ${CREATURES[def.cid].name} fall`:""}.`);
@@ -1748,7 +1927,10 @@ function castSpell(side,sid,target){
   if(sp.kind==="dmg"||sp.kind==="dmg2"){
     const hit=(u)=>{
       let dmg=Math.round(sp.dmg(pow)*(res25(u)?0.75:1));
+      const wasAlive=u.alive;
+      bfx({t:"burst",x:u.x,y:u.y,color:"#ff8a3c",dur:450});
       const k=applyDamage(u,dmg);
+      if(wasAlive&&!u.alive) bfx({t:"fade",x:u.x,y:u.y,cid:u.cid,dur:600});
       bfloat(u.x,u.y,"-"+dmg,"#b06bd4");
       blog(`<b>${sp.name}</b> sears ${CREATURES[u.cid].name} for <b>${dmg}</b>${k?` — ${k} fall`:""}.`);
     };
@@ -1764,6 +1946,7 @@ function castSpell(side,sid,target){
   } else if(sp.kind==="heal"){
     const amt=Math.round(sp.heal(pow));
     healUnit(target,amt);
+    bfx({t:"burst",x:target.x,y:target.y,color:"#7fb347",dur:450});
     bfloat(target.x,target.y,"+"+amt,"#7fb347");
     blog(`<b>${sp.name}</b> mends ${CREATURES[target.cid].name} for <b>${amt}</b>.`);
   } else if(sp.kind==="buff"||sp.kind==="debuff"){
@@ -1772,6 +1955,7 @@ function castSpell(side,sid,target){
       bfloat(target.x,target.y,"RESIST","#7fd4ff");
     } else {
       for(const e of sp.eff) target.eff.push({k:e.k,amt:e.amt,r:sp.rounds+1});
+      bfx({t:"burst",x:target.x,y:target.y,color:sp.kind==="buff"?"#7fd4ff":"#b06bd4",dur:450});
       bfloat(target.x,target.y,sp.kind==="buff"?"▲":"▼",sp.kind==="buff"?"#7fb347":"#d65f2a");
       blog(`<b>${sp.name}</b> ${sp.kind==="buff"?"blesses":"curses"} ${CREATURES[target.cid].name}.`);
     }
@@ -1784,6 +1968,7 @@ function castSpell(side,sid,target){
     for(let r=0;r<SPREAD.length&&!hexFree(u.x,u.y);r++){ u.y=SPREAD[r]; }
     if(!hexFree(u.x,u.y)){ return {ok:false,why:"No room to summon."}; }
     B.units.push(u); B.queue.push(u);
+    bfx({t:"burst",x:u.x,y:u.y,color:"#ffb35e",dur:500});
     bfloat(u.x,u.y,"SUMMON","#ffb35e");
     blog(`<b>${sp.name}</b>: ${n} Ember Sprites answer the call.`);
   }
@@ -2014,9 +2199,17 @@ function drawBattle(time){
     g.fill();
     g.strokeStyle="#1c2213"; g.lineWidth=1; g.stroke();
     if(B.obst.has(k)){
-      g.fillStyle="#57534e";
-      g.beginPath(); g.ellipse(c.x,c.y+2,bGeom.R*0.55,bGeom.R*0.4,0,0,7); g.fill();
-      g.fillStyle="#7d786f"; g.fillRect(c.x-3,c.y-6,6,5);
+      if((x+y*3)%2){                       // mossy boulder
+        g.fillStyle="#4f4a44";
+        g.beginPath(); g.ellipse(c.x,c.y+3,bGeom.R*0.55,bGeom.R*0.38,0,0,7); g.fill();
+        g.fillStyle="#6f6a63"; g.fillRect(c.x-5,c.y-7,9,8); g.fillRect(c.x-8,c.y-2,5,6);
+        g.fillStyle="#8a857c"; g.fillRect(c.x-4,c.y-6,4,3);
+        g.fillStyle="#4a5a34"; g.fillRect(c.x+1,c.y-8,4,3);
+      } else {                             // dead snag
+        g.fillStyle="#3a2a18"; g.fillRect(c.x-2,c.y-bGeom.R*0.6,4,bGeom.R);
+        g.fillRect(c.x-7,c.y-bGeom.R*0.45,6,2); g.fillRect(c.x+2,c.y-bGeom.R*0.3,7,2);
+        g.fillStyle="#241c14"; g.fillRect(c.x-6,c.y+bGeom.R*0.3,12,3);
+      }
     }
     if(B.walls.has(k)){
       const hp=B.walls.get(k);
@@ -2048,17 +2241,47 @@ function drawBattle(time){
       hexPath(g,c.x,c.y,bGeom.R-1.5); g.strokeStyle="#ffd95e"; g.lineWidth=1.5; g.stroke();
     }
   }
+  /* death fades render under living units */
+  const now=performance.now();
+  B.fx=B.fx.filter(f=>now-f.t0<f.dur);
+  for(const f of B.fx){
+    if(f.t!=="fade") continue;
+    const c=hexCenter(f.x,f.y), t=(now-f.t0)/f.dur;
+    const s=Math.min(bGeom.R*1.7,58);
+    g.globalAlpha=0.55*(1-t);
+    g.drawImage(creatureSprite(f.cid),c.x-s/2,c.y-s*0.75+t*6,s,s);
+    g.globalAlpha=1;
+  }
   /* units */
   for(const u of B.units){
     if(!u.alive) continue;
     const c=hexCenter(u.x,u.y);
+    /* melee lunge: nudge toward the victim and back */
+    let ox=0, oy=0;
+    for(const f of B.fx){
+      if(f.t==="lunge"&&f.u===u){
+        const tc=hexCenter(f.tx,f.ty), t=(now-f.t0)/f.dur;
+        const k=Math.sin(Math.PI*Math.min(1,t))*0.35;
+        ox=(tc.x-c.x)*k; oy=(tc.y-c.y)*k;
+      }
+    }
     if(u===act){ hexPath(g,c.x,c.y,bGeom.R-1.5); g.strokeStyle="#ffd95e"; g.lineWidth=2.5; g.stroke(); }
-    const icon=creatureIcon(u.cid);
-    const s=Math.min(bGeom.R*1.5,54);
+    const icon=creatureSprite(u.cid);
+    const s=Math.min(bGeom.R*1.7,58);
     g.save();
+    g.translate(ox,oy);
     if(u.side===1){ g.translate(c.x+s/2,0); g.scale(-1,1); g.drawImage(icon,0,c.y-s*0.75,s,s); }
     else g.drawImage(icon,c.x-s/2,c.y-s*0.75,s,s);
     g.restore();
+    /* hit flash */
+    for(const f of B.fx){
+      if(f.t==="flash"&&f.u===u){
+        const t=(now-f.t0)/f.dur;
+        g.globalAlpha=0.5*(1-t);
+        hexPath(g,c.x+ox,c.y+oy,bGeom.R-2); g.fillStyle="#fff"; g.fill();
+        g.globalAlpha=1;
+      }
+    }
     /* count badge + side stripe */
     const bw=Math.max(18,(""+u.n).length*7+8);
     g.fillStyle=u.side===0? "#2f5d8a":"#8a2f2b";
@@ -2076,8 +2299,27 @@ function drawBattle(time){
       if(cursed){ g.fillStyle="#d65f2a"; g.fillText("▼",c.x+bw/2+3,c.y+bGeom.R*0.28+22); }
     }
   }
+  /* projectiles + spell bursts */
+  for(const f of B.fx){
+    const t=(now-f.t0)/f.dur;
+    if(f.t==="proj"){
+      const a=hexCenter(f.x0,f.y0), b2=hexCenter(f.x1,f.y1);
+      const px2=lerp(a.x,b2.x,t), py2=lerp(a.y,b2.y,t)-Math.sin(Math.PI*t)*bGeom.R*1.2;
+      g.fillStyle="#f2efe6"; g.beginPath(); g.arc(px2,py2,2.5,0,7); g.fill();
+      g.fillStyle="#c9a22788"; g.beginPath(); g.arc(px2-(b2.x-a.x)*0.04,py2+2,1.5,0,7); g.fill();
+    } else if(f.t==="burst"){
+      const c=hexCenter(f.x,f.y);
+      g.globalAlpha=1-t;
+      for(let i=0;i<10;i++){
+        const a2=i/10*Math.PI*2+f.t0%7;
+        const r=t*bGeom.R*1.3;
+        g.fillStyle=f.color;
+        g.fillRect(c.x+Math.cos(a2)*r-1.5,c.y+Math.sin(a2)*r-1.5,3,3);
+      }
+      g.globalAlpha=1;
+    }
+  }
   /* floating texts */
-  const now=performance.now();
   B.floats=B.floats.filter(f=>now-f.t0<900);
   for(const f of B.floats){
     const c=hexCenter(f.x,f.y), t=(now-f.t0)/900;
@@ -2674,9 +2916,10 @@ function refreshUI(){
   for(const h of G.heroes.filter(h=>h.owner===0)){
     const c=document.createElement("div");
     c.className="card"+(UI.selected===h.id?" sel":"");
-    c.innerHTML=`<div class="nm">🛡 ${h.name}</div>
-      <div class="sub">Lv ${h.level} · ${Math.round(h.mp)} MP</div>
+    c.innerHTML=`<div class="nm" style="display:flex;align-items:center;gap:5px"><span class="crest"></span>${h.name}</div>
+      <div class="sub">Lv ${h.level} · ${Math.round(h.mp)} MP · ✨${h.mana}</div>
       <div class="mpbar"><i style="width:${Math.round(100*h.mp/h.maxMp)}%"></i></div>`;
+    c.querySelector(".crest").appendChild(heroCrest(h));
     c.onclick=()=>{ if(UI.selected===h.id){ openHeroPanel(h); } else { UI.selected=h.id; centerOn(h.x,h.y); refreshUI(); } };
     hl.appendChild(c);
   }
@@ -3377,6 +3620,7 @@ window.EV={
   get B(){ return B; },
   calcDamage, applyDamage, hostileInfoAt, townDefended, startBattle, rebuildOcc,
   bRecompute:()=>B&&B.active&&computeReach(B.active),
+  creatureSprite, creatureIcon,
   bHexPx:(x,y)=>bGeom?hexCenter(x,y):null,
   bAct:{ move:(x,y)=>B&&actMoveOnly(B.active,x,y), melee:t=>B&&actMelee(B.active,t),
     shoot:t=>B&&actShoot(B.active,t), wait:()=>B&&actWait(B.active),
